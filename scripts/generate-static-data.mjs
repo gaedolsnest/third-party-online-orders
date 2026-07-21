@@ -47,6 +47,14 @@ function isoDate(value, timeValue) {
   return parsed.toISOString()
 }
 
+function koreaDateKey(value) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(value))
+  const getPart = (type) => parts.find((part) => part.type === type)?.value || ''
+  return `${getPart('year')}-${getPart('month')}-${getPart('day')}`
+}
+
 function parseMaster() {
   const { sheetName, sheet } = firstSheet(masterPath)
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false })
@@ -87,6 +95,7 @@ function parseOrders() {
   const get = (row, name) => columns[name] >= 0 ? row[columns[name]] : ''
   const dataStart = headerRow + (hasSecondHeader ? 2 : 1)
   let ignoredCompleted = 0
+  const sourceDates = []
   const parsed = []
   for (let index = dataStart; index < matrix.length; index += 1) {
     const row = matrix[index]
@@ -94,9 +103,10 @@ function parseOrders() {
     const status = text(get(row, '진행상태'))
     if (!status) continue
     const sourceNo = text(get(row, 'No'))
+    const registeredAt = isoDate(get(row, '등록일자'))
+    if (registeredAt) sourceDates.push(koreaDateKey(registeredAt))
     if (status === '정산') { ignoredCompleted += 1; continue }
     const storeName = text(get(row, '매장명'))
-    const registeredAt = isoDate(get(row, '등록일자'))
     const lineNo = number(get(row, '순번'), 1)
     const orderNo = text(get(row, '주문번호(비고)')) || `${registeredAt?.slice(0, 10) || '등록일 미입력'} / 순번 ${lineNo}`
     if (!orderNo || !storeName || !registeredAt || !['등록', '출고', '정산'].includes(status)) throw new Error(`주문 파일 ${index + 1}행의 필수값을 확인해 주세요.`)
@@ -113,7 +123,13 @@ function parseOrders() {
       sales_date: isoDate(get(row, '매출일자')), pos_no: text(get(row, 'POS번호')), transaction_no: text(get(row, '거래번호')),
     })
   }
-  return { sheetName, orders: [...new Map(parsed.map((order) => [`${order.order_no}::${order.line_no}`, order])).values()], ignoredCompleted }
+  sourceDates.sort()
+  return {
+    sheetName,
+    orders: [...new Map(parsed.map((order) => [`${order.order_no}::${order.line_no}`, order])).values()],
+    ignoredCompleted,
+    dataPeriod: { from: sourceDates[0] || null, to: sourceDates.at(-1) || null },
+  }
 }
 
 const master = parseMaster()
@@ -146,6 +162,6 @@ const manifestStores = visibleStores.sort((a, b) => a.store_name.localeCompare(b
   if (file) writeFileSync(join(outputPath, file), JSON.stringify({ version, generated_at: generatedAt, store, orders }))
   return { ...store, file, order_count: orders.length }
 })
-const manifest = { version, generated_at: generatedAt, source: { master_sheet: master.sheetName, orders_sheet: source.sheetName }, total_orders: resolved.length, ignored_completed: source.ignoredCompleted, stores: manifestStores }
+const manifest = { version, generated_at: generatedAt, data_period: source.dataPeriod, source: { master_sheet: master.sheetName, orders_sheet: source.sheetName }, total_orders: resolved.length, ignored_completed: source.ignoredCompleted, stores: manifestStores }
 writeFileSync(join(outputPath, 'manifest.json'), JSON.stringify(manifest))
-console.log(JSON.stringify({ output: outputPath, version, stores: visibleStores.length, excluded_return_stores: excludedStores.length, stores_with_orders: grouped.size, open_orders: resolved.length, ignored_completed: source.ignoredCompleted }, null, 2))
+console.log(JSON.stringify({ output: outputPath, version, data_period: source.dataPeriod, stores: visibleStores.length, excluded_return_stores: excludedStores.length, stores_with_orders: grouped.size, open_orders: resolved.length, ignored_completed: source.ignoredCompleted }, null, 2))

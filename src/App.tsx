@@ -11,6 +11,7 @@ type Filter = 'all' | 'shipping_delay' | 'settlement_delay' | 'warning' | 'compl
 type StoreOption = { store_code: string; store_name: string }
 
 const filterLabels: Record<Filter, string> = { all: '전체 예외', shipping_delay: '출고 지연', settlement_delay: '정산 지연', warning: '처리 임박', complete: '오늘 종료' }
+const formatPeriodDate = (value?: string | null) => value ? value.replace(/-/g, '.') : '—'
 
 function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
@@ -106,10 +107,10 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
             {!filteredStores.length && <p>검색 결과가 없습니다.</p>}
           </div>
         </div>
-        <label>비밀번호 (6자리)<div className="input-wrap"><span className="dot-icon">•••</span><input type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={password} onChange={(e) => setPassword(e.target.value.replace(/\D/g, ''))} placeholder="99 + 점포코드 4자리" /></div></label>
+        <label>비밀번호 (6자리)<div className="input-wrap"><span className="dot-icon">•••</span><input type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={password} onChange={(e) => setPassword(e.target.value.replace(/\D/g, ''))} placeholder="비밀번호 6자리 입력" /></div></label>
         {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
         <button className="primary-button" disabled={loading}>{loading ? '확인 중…' : '로그인'}<ArrowUpRight size={18} /></button>
-        {manifest && <p className="demo-note">점포별 분리 데이터 · {formatDate(manifest.generated_at)} 기준</p>}
+        {manifest && <p className="demo-note">{manifest.data_period?.from && manifest.data_period?.to && <>조회 데이터 기간 · {formatPeriodDate(manifest.data_period.from)} ~ {formatPeriodDate(manifest.data_period.to)}<br /></>}최종 갱신 · {formatDate(manifest.generated_at)}</p>}
       </form>
     </section>
   </main>

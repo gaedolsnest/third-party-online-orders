@@ -11,6 +11,7 @@ export interface StaticStore {
 export interface StaticManifest {
   version: string
   generated_at: string
+  data_period?: { from: string | null; to: string | null }
   total_orders: number
   ignored_completed: number
   stores: StaticStore[]
