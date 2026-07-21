@@ -90,7 +90,7 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
         <h1>놓치는 주문 없이,<br /><em>약속된 시간</em> 안에.</h1>
         <p>매장별 타사 온라인 주문의 출고와 정산 지연을<br />하나의 화면에서 빠르게 확인하세요.</p>
       </div>
-      <div className="sla-rule"><div><span>등록 SLA</span><strong>D+2</strong></div><div className="rule-line" /><div><span>출고 SLA</span><strong>D+5</strong></div></div>
+      <div className="sla-rule"><div><span>출고 처리기한</span><strong>등록 후 2일</strong></div><div className="rule-line" /><div><span>정산 처리기한</span><strong>출고 후 5일</strong></div></div>
     </section>
     <section className="login-panel">
       <form className="login-card" onSubmit={submit}>
@@ -168,14 +168,14 @@ function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; mani
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
       <div className="brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="" /></span><span>타사 온라인 예외관리</span></div>
-      <nav><p>WORKSPACE</p><button className="active"><LayoutDashboard size={19} />주문 현황</button>{profile.role === 'admin' && <><button onClick={() => setUploadOpen(true)}><FileSpreadsheet size={19} />엑셀 동기화</button><button onClick={() => setSettingsOpen(true)}><Settings2 size={19} />SLA 기준 설정</button></>}</nav>
-      <div className="sidebar-bottom"><div className="sla-mini"><Clock3 size={17} /><div><span>SLA 운영 기준</span><strong>등록 {slaDays.shipping}일 · 출고 {slaDays.settlement}일</strong></div></div><button className="logout" onClick={onLogout}><LogOut size={17} />로그아웃</button></div>
+      <nav><p>WORKSPACE</p><button className="active"><LayoutDashboard size={19} />주문 현황</button>{profile.role === 'admin' && <><button onClick={() => setUploadOpen(true)}><FileSpreadsheet size={19} />엑셀 동기화</button><button onClick={() => setSettingsOpen(true)}><Settings2 size={19} />처리기한 설정</button></>}</nav>
+      <div className="sidebar-bottom"><div className="sla-mini"><Clock3 size={17} /><div><span>처리기한 기준</span><strong>등록 후 {slaDays.shipping}일 · 출고 후 {slaDays.settlement}일</strong></div></div><button className="logout" onClick={onLogout}><LogOut size={17} />로그아웃</button></div>
     </aside>
     {mobileNav && <button className="nav-scrim" onClick={() => setMobileNav(false)} aria-label="메뉴 닫기" />}
     <main className="dashboard">
       <header className="topbar"><button className="menu-button" onClick={() => setMobileNav(true)}><Menu /></button><div><span className="location-label">현재 조회 매장</span><strong>{profile.role === 'admin' ? '전체 매장' : storeLabel} <ChevronDown size={15} /></strong></div><div className="profile-chip"><span>{profile.role === 'admin' ? profile.display_name.slice(0, 1) : storeLabel.slice(0, 1)}</span><div><strong>{profile.role === 'admin' ? profile.display_name : storeLabel}</strong><small>{profile.role === 'admin' ? 'Administrator' : '매장'}</small></div></div></header>
       <div className="content">
-        <section className="page-heading"><div><p className="eyebrow">ORDER EXCEPTIONS</p><h1>타사 온라인 주문 현황</h1><p>{profile.role === 'admin' ? `전체 매장의 SLA 지연 건을 우선 확인하세요.${lastSync ? ` · 마지막 동기화 ${formatDate(lastSync)}` : ''}` : `${storeLabel}의 처리가 필요한 주문을 확인하세요.`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={loadOrders}><RefreshCw size={16} />새로고침</button>{profile.role === 'admin' && <button className="primary-button compact" onClick={() => setUploadOpen(true)}><UploadCloud size={17} />엑셀 업로드</button>}</div></section>
+        <section className="page-heading"><div><p className="eyebrow">ORDER EXCEPTIONS</p><h1>타사 온라인 주문 현황</h1><p>{profile.role === 'admin' ? `전체 매장의 처리 지연 건을 우선 확인하세요.${lastSync ? ` · 마지막 동기화 ${formatDate(lastSync)}` : ''}` : `${storeLabel}의 처리가 필요한 주문을 확인하세요.`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={loadOrders}><RefreshCw size={16} />새로고침</button>{profile.role === 'admin' && <button className="primary-button compact" onClick={() => setUploadOpen(true)}><UploadCloud size={17} />엑셀 업로드</button>}</div></section>
         {manifest && <div className="demo-banner"><Check size={17} /><span><strong>점포 전용 데이터로 조회 중입니다.</strong> 마지막 갱신 {formatDate(manifest.generated_at)}</span></div>}
         {!manifest && !isSupabaseConfigured && <div className="demo-banner"><CircleAlert size={17} /><span><strong>데모 데이터로 표시 중입니다.</strong></span></div>}
         {error && <div className="form-error page-error"><CircleAlert size={16} />{error}</div>}
@@ -202,21 +202,21 @@ function SlaSettingsModal({ initial, onClose, onSaved }: { initial: { shipping: 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const save = async () => {
-    if (shipping < 1 || settlement < 1 || shipping > 30 || settlement > 30) { setError('SLA 기준은 1~30일로 입력해 주세요.'); return }
+    if (shipping < 1 || settlement < 1 || shipping > 30 || settlement > 30) { setError('처리기한은 1~30일로 입력해 주세요.'); return }
     setSaving(true); setError('')
     if (supabase) {
       const { error: saveError } = await supabase.rpc('set_sla_policy', { p_shipping_days: shipping, p_settlement_days: settlement })
-      if (saveError) { setError('SLA 기준을 저장하지 못했습니다.'); setSaving(false); return }
+      if (saveError) { setError('처리기한을 저장하지 못했습니다.'); setSaving(false); return }
     } else await new Promise((resolve) => setTimeout(resolve, 450))
     onSaved({ shipping, settlement })
   }
-  return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><p className="eyebrow">SLA POLICY</p><h2>SLA 기준 설정</h2></div><button onClick={onClose} aria-label="닫기"><X /></button></div><p className="settings-help">새 기준은 저장 시점부터 적용되며, 이전 기준은 이력으로 보존됩니다.</p><div className="settings-fields"><label><span>등록 → 출고</span><div><input type="number" min="1" max="30" value={shipping} onChange={(e) => setShipping(Number(e.target.value))} /><strong>일 초과</strong></div><small>초과 시 출고지연으로 분류</small></label><label><span>출고 → 정산</span><div><input type="number" min="1" max="30" value={settlement} onChange={(e) => setSettlement(Number(e.target.value))} /><strong>일 초과</strong></div><small>초과 시 정산지연으로 분류</small></label></div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>취소</button><button className="primary-button compact" disabled={saving} onClick={save}>{saving ? '저장 중…' : '기준 저장'}</button></div></section></div>
+  return <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true"><div className="modal-head"><div><p className="eyebrow">PROCESS DEADLINE</p><h2>처리기한 설정</h2></div><button onClick={onClose} aria-label="닫기"><X /></button></div><p className="settings-help">새 기준은 저장 시점부터 적용되며, 이전 기준은 이력으로 보존됩니다.</p><div className="settings-fields"><label><span>등록 → 출고</span><div><input type="number" min="1" max="30" value={shipping} onChange={(e) => setShipping(Number(e.target.value))} /><strong>일 초과</strong></div><small>초과 시 출고지연으로 분류</small></label><label><span>출고 → 정산</span><div><input type="number" min="1" max="30" value={settlement} onChange={(e) => setSettlement(Number(e.target.value))} /><strong>일 초과</strong></div><small>초과 시 정산지연으로 분류</small></label></div>{error && <div className="form-error"><CircleAlert size={16} />{error}</div>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>취소</button><button className="primary-button compact" disabled={saving} onClick={save}>{saving ? '저장 중…' : '기준 저장'}</button></div></section></div>
 }
 
 function OrderTable({ orders, loading, showStore }: { orders: OrderWithSla[]; loading: boolean; showStore: boolean }) {
   if (loading) return <div className="table-empty"><div className="loader" />주문을 불러오는 중입니다.</div>
   if (!orders.length) return <div className="table-empty"><PackageCheck size={28} /><strong>조건에 맞는 주문이 없습니다.</strong><span>검색어나 필터를 변경해 보세요.</span></div>
-  return <div className="table-scroll"><table><thead><tr><th>예외 상태</th><th>주문번호 / 순번</th>{showStore && <th>매장</th>}<th>브랜드 / 상품</th><th>등록일</th><th>출고일</th><th>SLA 기한</th><th>진행상태</th></tr></thead><tbody>{orders.map((order) => <tr key={`${order.order_no}-${order.line_no}`} className={order.slaLevel === 'delayed' ? 'row-delayed' : ''}><td><span className={`sla-badge ${order.slaLevel}`}>{order.slaLevel === 'delayed' && <AlertTriangle size={13} />}{order.slaLabel}</span></td><td><strong className="order-no">{order.order_no}</strong><small className="line-no">#{order.line_no}</small></td>{showStore && <td><span className="store-code">{order.store_name}</span></td>}<td><div className="product-cell"><strong>{order.brand || '—'}</strong><span>{order.product_name} · {order.quantity}개</span></div></td><td>{formatDate(order.registered_at)}</td><td>{formatDate(order.shipped_at)}</td><td className={order.slaLevel === 'delayed' ? 'red-text' : ''}>{formatDate(order.dueAt)}</td><td><span className="status-dot" />{order.status}</td></tr>)}</tbody></table></div>
+  return <div className="table-scroll"><table><thead><tr><th>처리 상태</th><th>주문번호 / 순번</th>{showStore && <th>매장</th>}<th>브랜드 / 상품</th><th>등록일</th><th>출고일</th><th>처리 기한</th><th>진행상태</th></tr></thead><tbody>{orders.map((order) => <tr key={`${order.order_no}-${order.line_no}`} className={order.slaLevel === 'delayed' ? 'row-delayed' : ''}><td><span className={`sla-badge ${order.slaLevel}`}>{order.slaLevel === 'delayed' && <AlertTriangle size={13} />}{order.slaLabel}</span></td><td><strong className="order-no">{order.order_no}</strong><small className="line-no">#{order.line_no}</small></td>{showStore && <td><span className="store-code">{order.store_name}</span></td>}<td><div className="product-cell"><strong>{order.brand || '—'}</strong><span>{order.product_name} · {order.quantity}개</span></div></td><td>{formatDate(order.registered_at)}</td><td>{formatDate(order.shipped_at)}</td><td className={order.slaLevel === 'delayed' ? 'red-text' : ''}>{formatDate(order.dueAt)}</td><td><span className="status-dot" />{order.status}</td></tr>)}</tbody></table></div>
 }
 
 function UploadModal({ onClose, onComplete }: { onClose: () => void; onComplete: () => Promise<void> }) {
