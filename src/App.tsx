@@ -127,7 +127,7 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
         <div className="mobile-brand brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="" /></span><span>타사 온라인 예외관리</span></div>
         <p className="eyebrow">WELCOME BACK</p>
         <h2>매장 조회</h2>
-        <p className="login-help">우리 매장에서 처리가 막힌 타사 온라인 주문을 확인하세요.</p>
+        <p className="login-help">우리 매장의 확인이 필요한 타사 온라인 주문을 한눈에 살펴보세요.</p>
         <label>매장명 검색<div className="input-wrap"><Search size={18} /><input autoFocus value={identity} onChange={(e) => { setIdentity(e.target.value); setSelectedStoreCode(null) }} placeholder="매장명을 입력하세요" /></div></label>
         <div className="store-picker" aria-label="매장 목록">
           <div className="store-picker-head"><span>매장 목록</span><strong>{filteredStores.length}{storeOptions.length > 100 && !identity ? '+' : ''}개</strong></div>
