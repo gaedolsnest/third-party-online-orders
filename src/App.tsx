@@ -3,12 +3,14 @@ import { AlertTriangle, ArrowDownToLine, ArrowUpRight, Check, ChevronDown, Circl
 import { demoOrders } from './data/demo'
 import { isSupabaseConfigured, storeEmail, supabase } from './lib/supabase'
 import { formatDate, withSla } from './lib/sla'
-import { loadStaticManifest, loadStaticStoreOrders, type StaticManifest } from './lib/staticData'
+import { loadAllStaticOrders, loadStaticManifest, loadStaticStoreOrders, type StaticManifest } from './lib/staticData'
 import type { OnlineOrder, OrderWithSla, UserProfile } from './types'
 
 type LoginMode = 'store' | 'admin'
 type Filter = 'all' | 'shipping_delay' | 'settlement_delay' | 'warning' | 'complete'
 type StoreOption = { store_code: string; store_name: string }
+
+const MASTER_KEY = 'audit2026!'
 
 const filterLabels: Record<Filter, string> = { all: '전체 예외', shipping_delay: '출고 지연', settlement_delay: '정산 지연', warning: '처리 임박', complete: '오늘 종료' }
 const formatPeriodDate = (value?: string | null) => value ? value.replace(/-/g, '.') : '—'
@@ -45,6 +47,9 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedStoreCode, setSelectedStoreCode] = useState<string | null>(null)
+  const [masterOpen, setMasterOpen] = useState(false)
+  const [masterPassword, setMasterPassword] = useState('')
+  const [masterError, setMasterError] = useState('')
   const [storeOptions, setStoreOptions] = useState<StoreOption[]>(() => manifest?.stores || [...new Map(demoOrders.map((order) => [order.store_code, { store_code: order.store_code, store_name: order.store_name }])).values()].sort((a, b) => a.store_name.localeCompare(b.store_name, 'ko')))
 
   useEffect(() => {
@@ -53,6 +58,19 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
     supabase.rpc('list_active_stores').then(({ data }) => {
       if (data) setStoreOptions((data as StoreOption[]).filter((store) => store.store_code && store.store_name))
     })
+  }, [])
+
+  useEffect(() => {
+    const openMasterLogin = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setMasterOpen(false); return }
+      if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== 'm') return
+      event.preventDefault()
+      setMasterPassword('')
+      setMasterError('')
+      setMasterOpen(true)
+    }
+    window.addEventListener('keydown', openMasterLogin)
+    return () => window.removeEventListener('keydown', openMasterLogin)
   }, [])
 
   const filteredStores = useMemo(() => {
@@ -81,6 +99,16 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
       onLogin(userProfile as UserProfile)
     } catch (err) { setError(err instanceof Error ? err.message : '로그인 중 오류가 발생했습니다.') }
     finally { setLoading(false) }
+  }
+
+  const submitMaster = (event: React.FormEvent) => {
+    event.preventDefault()
+    setMasterError('')
+    if (masterPassword.trim().toLowerCase() !== MASTER_KEY.toLowerCase()) {
+      setMasterError('마스터 암호가 아닙니다.')
+      return
+    }
+    onLogin({ id: 'static-master', role: 'admin', store_code: null, display_name: '마스터' })
   }
 
   return <main className="login-page">
@@ -113,6 +141,17 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
         {manifest && <p className="demo-note">{manifest.data_period?.from && manifest.data_period?.to && <>조회 데이터 기간 · {formatPeriodDate(manifest.data_period.from)} ~ {formatPeriodDate(manifest.data_period.to)}<br /></>}최종 갱신 · {formatDate(manifest.generated_at)}</p>}
       </form>
     </section>
+    {masterOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setMasterOpen(false) }}>
+      <section className="modal master-login-modal" role="dialog" aria-modal="true" aria-labelledby="master-login-title">
+        <div className="modal-head"><div><p className="eyebrow">MASTER ACCESS</p><h2 id="master-login-title">마스터 암호 입력</h2></div><button type="button" onClick={() => setMasterOpen(false)} aria-label="닫기"><X /></button></div>
+        <p className="master-login-help">마스터 암호로 접속하면 전체 점포의 주문 예외 현황을 조회할 수 있습니다.</p>
+        <form onSubmit={submitMaster}>
+          <label>마스터 암호<div className="input-wrap"><span className="dot-icon">•••</span><input autoFocus type="password" value={masterPassword} onChange={(event) => setMasterPassword(event.target.value)} placeholder="암호 입력" /></div></label>
+          {masterError && <div className="form-error"><CircleAlert size={16} />{masterError}</div>}
+          <button className="primary-button">마스터 로그인<ArrowUpRight size={18} /></button>
+        </form>
+      </section>
+    </div>}
   </main>
 }
 
@@ -131,6 +170,11 @@ function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; mani
 
   const loadOrders = async () => {
     setLoading(true); setError('')
+    if (manifest && profile.role === 'admin') {
+      try { setOrders(await loadAllStaticOrders(manifest)); setLastSync(manifest.generated_at) }
+      catch { setError('전체 주문 데이터를 불러오지 못했습니다.') }
+      setLoading(false); return
+    }
     if (manifest && profile.store_code) {
       const store = manifest.stores.find((item) => item.store_code === profile.store_code)
       if (!store) { setError('점포 정보를 찾지 못했습니다.'); setLoading(false); return }
@@ -169,15 +213,15 @@ function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; mani
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
       <div className="brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="" /></span><span>타사 온라인 예외관리</span></div>
-      <nav><p>WORKSPACE</p><button className="active"><LayoutDashboard size={19} />주문 현황</button>{profile.role === 'admin' && <><button onClick={() => setUploadOpen(true)}><FileSpreadsheet size={19} />엑셀 동기화</button><button onClick={() => setSettingsOpen(true)}><Settings2 size={19} />처리기한 설정</button></>}</nav>
+      <nav><p>WORKSPACE</p><button className="active"><LayoutDashboard size={19} />주문 현황</button>{profile.role === 'admin' && !manifest && <><button onClick={() => setUploadOpen(true)}><FileSpreadsheet size={19} />엑셀 동기화</button><button onClick={() => setSettingsOpen(true)}><Settings2 size={19} />처리기한 설정</button></>}</nav>
       <div className="sidebar-bottom"><div className="sla-mini"><Clock3 size={17} /><div><span>처리기한 기준</span><strong>등록 후 {slaDays.shipping}일 · 출고 후 {slaDays.settlement}일</strong></div></div><button className="logout" onClick={onLogout}><LogOut size={17} />로그아웃</button></div>
     </aside>
     {mobileNav && <button className="nav-scrim" onClick={() => setMobileNav(false)} aria-label="메뉴 닫기" />}
     <main className="dashboard">
       <header className="topbar"><button className="menu-button" onClick={() => setMobileNav(true)}><Menu /></button><div><span className="location-label">현재 조회 매장</span><strong>{profile.role === 'admin' ? '전체 매장' : storeLabel} <ChevronDown size={15} /></strong></div><div className="profile-chip"><span>{profile.role === 'admin' ? profile.display_name.slice(0, 1) : storeLabel.slice(0, 1)}</span><div><strong>{profile.role === 'admin' ? profile.display_name : storeLabel}</strong><small>{profile.role === 'admin' ? 'Administrator' : '매장'}</small></div></div></header>
       <div className="content">
-        <section className="page-heading"><div><p className="eyebrow">ORDER EXCEPTIONS</p><h1>타사 온라인 주문 현황</h1><p>{profile.role === 'admin' ? `전체 매장의 처리 지연 건을 우선 확인하세요.${lastSync ? ` · 마지막 동기화 ${formatDate(lastSync)}` : ''}` : `${storeLabel}의 처리가 필요한 주문을 확인하세요.`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={loadOrders}><RefreshCw size={16} />새로고침</button>{profile.role === 'admin' && <button className="primary-button compact" onClick={() => setUploadOpen(true)}><UploadCloud size={17} />엑셀 업로드</button>}</div></section>
-        {manifest && <div className="demo-banner"><Check size={17} /><span><strong>점포 전용 데이터로 조회 중입니다.</strong> 마지막 갱신 {formatDate(manifest.generated_at)}</span></div>}
+        <section className="page-heading"><div><p className="eyebrow">ORDER EXCEPTIONS</p><h1>타사 온라인 주문 현황</h1><p>{profile.role === 'admin' ? `전체 매장의 처리 지연 건을 우선 확인하세요.${lastSync ? ` · 마지막 동기화 ${formatDate(lastSync)}` : ''}` : `${storeLabel}의 처리가 필요한 주문을 확인하세요.`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={loadOrders}><RefreshCw size={16} />새로고침</button>{profile.role === 'admin' && !manifest && <button className="primary-button compact" onClick={() => setUploadOpen(true)}><UploadCloud size={17} />엑셀 업로드</button>}</div></section>
+        {manifest && <div className="demo-banner"><Check size={17} /><span><strong>{profile.role === 'admin' ? '마스터 전체 데이터로 조회 중입니다.' : '점포 전용 데이터로 조회 중입니다.'}</strong> 마지막 갱신 {formatDate(manifest.generated_at)}</span></div>}
         {!manifest && !isSupabaseConfigured && <div className="demo-banner"><CircleAlert size={17} /><span><strong>데모 데이터로 표시 중입니다.</strong></span></div>}
         {error && <div className="form-error page-error"><CircleAlert size={16} />{error}</div>}
         <section className="metrics">
