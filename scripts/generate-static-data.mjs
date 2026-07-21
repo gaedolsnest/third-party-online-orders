@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import * as XLSX from 'xlsx'
 
@@ -124,7 +124,13 @@ if (unmatched.length) throw new Error(`점포마스터 미매칭 ${unmatched.len
 const resolved = source.orders.map((order) => ({ ...order, store_code: storeByName.get(normalize(order.store_name)).store_code }))
 const sourceHash = createHash('sha256').update(readFileSync(masterPath)).update(readFileSync(ordersPath)).digest('hex')
 const version = sourceHash.slice(0, 12)
-const generatedAt = new Date().toISOString()
+const previousManifestPath = join(outputPath, 'manifest.json')
+let previousManifest = null
+if (existsSync(previousManifestPath)) {
+  try { previousManifest = JSON.parse(readFileSync(previousManifestPath, 'utf8')) }
+  catch { previousManifest = null }
+}
+const generatedAt = previousManifest?.version === version ? previousManifest.generated_at : new Date().toISOString()
 const storesPath = join(outputPath, 'stores')
 rmSync(outputPath, { recursive: true, force: true })
 mkdirSync(storesPath, { recursive: true })
