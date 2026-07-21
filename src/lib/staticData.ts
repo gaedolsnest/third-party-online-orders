@@ -28,16 +28,18 @@ export function loadStaticManifest() {
   return manifestPromise
 }
 
-export async function loadStaticStoreOrders(store: StaticStore): Promise<OnlineOrder[]> {
+export async function loadStaticStoreOrders(store: StaticStore, version?: string): Promise<OnlineOrder[]> {
   if (!store.file) return []
-  const response = await fetch(`./data/${store.file}`, { cache: 'force-cache' })
-  if (!response.ok) throw new Error('점포 주문 파일을 불러오지 못했습니다.')
-  const data = await response.json() as { orders: OnlineOrder[] }
-  return data.orders
-}
-
-export async function loadAllStaticOrders(manifest: StaticManifest): Promise<OnlineOrder[]> {
-  const active = manifest.stores.filter((store) => store.file)
-  const chunks = await Promise.all(active.map(loadStaticStoreOrders))
-  return chunks.flat()
+  const url = `./data/${store.file}${version ? `?v=${encodeURIComponent(version)}` : ''}`
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(url, { cache: attempt === 0 ? 'force-cache' : 'reload' })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json() as { orders: OnlineOrder[] }
+      return data.orders
+    } catch (error) {
+      if (attempt === 1) throw error
+    }
+  }
+  return []
 }

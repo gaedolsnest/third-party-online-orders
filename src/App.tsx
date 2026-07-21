@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDownToLine, ArrowUpRight, Check, ChevronDown, CircleAlert, Clock3, FileSpreadsheet, LayoutDashboard, LogOut, Menu, PackageCheck, RefreshCw, Search, Settings2, Store, UploadCloud, X } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, ArrowLeft, ArrowUpRight, Check, ChevronDown, CircleAlert, Clock3, FileSpreadsheet, LayoutDashboard, LogOut, Menu, PackageCheck, RefreshCw, Search, Settings2, Store, UploadCloud, X } from 'lucide-react'
 import { demoOrders } from './data/demo'
 import { isSupabaseConfigured, storeEmail, supabase } from './lib/supabase'
 import { formatDate, withSla } from './lib/sla'
-import { loadAllStaticOrders, loadStaticManifest, loadStaticStoreOrders, type StaticManifest } from './lib/staticData'
+import { loadStaticManifest, loadStaticStoreOrders, type StaticManifest } from './lib/staticData'
 import type { OnlineOrder, OrderWithSla, UserProfile } from './types'
 
 type LoginMode = 'store' | 'admin'
@@ -17,6 +17,7 @@ const formatPeriodDate = (value?: string | null) => value ? value.replace(/-/g, 
 
 function App() {
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [masterUnlocked, setMasterUnlocked] = useState(false)
   const [booting, setBooting] = useState(true)
   const [manifest, setManifest] = useState<StaticManifest | null>(null)
 
@@ -36,11 +37,11 @@ function App() {
   }, [])
 
   if (booting) return <div className="center-screen"><div className="loader" /><span>주문 현황을 불러오는 중입니다</span></div>
-  if (!profile) return <Login manifest={manifest} onLogin={setProfile} />
-  return <Dashboard profile={profile} manifest={manifest} onLogout={async () => { await supabase?.auth.signOut(); setProfile(null) }} />
+  if (!profile) return <Login manifest={manifest} masterUnlocked={masterUnlocked} onMasterUnlock={() => setMasterUnlocked(true)} onLogin={setProfile} />
+  return <Dashboard profile={profile} manifest={manifest} onBack={profile.role === 'admin' ? () => setProfile(null) : undefined} onLogout={async () => { await supabase?.auth.signOut(); setMasterUnlocked(false); setProfile(null) }} />
 }
 
-function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin: (profile: UserProfile) => void }) {
+function Login({ manifest, masterUnlocked, onMasterUnlock, onLogin }: { manifest: StaticManifest | null; masterUnlocked: boolean; onMasterUnlock: () => void; onLogin: (profile: UserProfile) => void }) {
   const mode: LoginMode = 'store'
   const [identity, setIdentity] = useState('')
   const [password, setPassword] = useState('')
@@ -109,7 +110,9 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
       setMasterError('마스터 암호가 아닙니다.')
       return
     }
-    onLogin({ id: 'static-master', role: 'admin', store_code: null, display_name: '마스터' })
+    setMasterOpen(false)
+    setMasterPassword('')
+    onMasterUnlock()
   }
 
   return <main className="login-page">
@@ -123,22 +126,24 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
       <div className="sla-rule"><div><span>출고 처리기한</span><strong>등록 후 2일</strong></div><div className="rule-line" /><div><span>정산 처리기한</span><strong>출고 후 5일</strong></div></div>
     </section>
     <section className="login-panel">
-      <form className="login-card" onSubmit={submit}>
+      <form className="login-card" onSubmit={masterUnlocked ? (event) => event.preventDefault() : submit}>
         <div className="mobile-brand brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="" /></span><span>타사 온라인 예외관리</span></div>
-        <p className="eyebrow">WELCOME BACK</p>
-        <h2>매장 조회</h2>
-        <p className="login-help">우리 매장의 확인이 필요한 타사 온라인 주문을 한눈에 살펴보세요.</p>
+        <p className="eyebrow">{masterUnlocked ? 'MASTER ACCESS' : 'WELCOME BACK'}</p>
+        <h2>{masterUnlocked ? '조회할 점포 선택' : '매장 조회'}</h2>
+        <p className="login-help">{masterUnlocked ? '검색하거나 목록에서 점포를 선택하면 바로 주문 현황으로 이동합니다.' : '우리 매장의 확인이 필요한 타사 온라인 주문을 한눈에 살펴보세요.'}</p>
         <label>매장명 검색<div className="input-wrap"><Search size={18} /><input autoFocus value={identity} onChange={(e) => { setIdentity(e.target.value); setSelectedStoreCode(null) }} placeholder="매장명을 입력하세요" /></div></label>
         <div className="store-picker" aria-label="매장 목록">
           <div className="store-picker-head"><span>매장 목록</span><strong>{filteredStores.length}{storeOptions.length > 100 && !identity ? '+' : ''}개</strong></div>
           <div className="store-picker-list">
-            {filteredStores.map((store) => <button type="button" key={store.store_code} className={selectedStoreCode === store.store_code ? 'selected' : ''} onClick={() => { setIdentity(store.store_name); setSelectedStoreCode(store.store_code); setError('') }}><Store size={15} /><span>{store.store_name}</span>{selectedStoreCode === store.store_code && <Check size={15} />}</button>)}
+            {filteredStores.map((store) => <button type="button" key={store.store_code} className={selectedStoreCode === store.store_code ? 'selected' : ''} onClick={() => { if (masterUnlocked) { onLogin({ id: `static-master:${store.store_code}`, role: 'admin', store_code: store.store_code, display_name: '마스터' }); return } setIdentity(store.store_name); setSelectedStoreCode(store.store_code); setError('') }}><Store size={15} /><span>{store.store_name}</span>{selectedStoreCode === store.store_code && <Check size={15} />}</button>)}
             {!filteredStores.length && <p>검색 결과가 없습니다.</p>}
           </div>
         </div>
-        <label>비밀번호 (6자리)<div className="input-wrap"><span className="dot-icon">•••</span><input type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={password} onChange={(e) => setPassword(e.target.value.replace(/\D/g, ''))} placeholder="비밀번호 6자리 입력" /></div></label>
-        {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
-        <button className="primary-button" disabled={loading}>{loading ? '확인 중…' : '로그인'}<ArrowUpRight size={18} /></button>
+        {masterUnlocked ? <div className="master-unlocked"><Check size={17} /><span><strong>마스터 모드</strong> · 조회할 점포를 선택해 주세요.</span></div> : <>
+          <label>비밀번호 (6자리)<div className="input-wrap"><span className="dot-icon">•••</span><input type="password" inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={password} onChange={(e) => setPassword(e.target.value.replace(/\D/g, ''))} placeholder="비밀번호 6자리 입력" /></div></label>
+          {error && <div className="form-error"><CircleAlert size={16} />{error}</div>}
+          <button className="primary-button" disabled={loading}>{loading ? '확인 중…' : '로그인'}<ArrowUpRight size={18} /></button>
+        </>}
         {manifest && <p className="demo-note">{manifest.data_period?.from && manifest.data_period?.to && <>조회 데이터 기간 · {formatPeriodDate(manifest.data_period.from)} ~ {formatPeriodDate(manifest.data_period.to)}<br /></>}최종 갱신 · {formatDate(manifest.generated_at)}</p>}
       </form>
     </section>
@@ -156,8 +161,9 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
   </main>
 }
 
-function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; manifest: StaticManifest | null; onLogout: () => void }) {
-  const storeLabel = profile.display_name.replace(/\s*점포\s*$/, '')
+function Dashboard({ profile, manifest, onBack, onLogout }: { profile: UserProfile; manifest: StaticManifest | null; onBack?: () => void; onLogout: () => void }) {
+  const selectedStore = manifest?.stores.find((store) => store.store_code === profile.store_code)
+  const storeLabel = (selectedStore?.store_name || profile.display_name).replace(/\s*점포\s*$/, '')
   const [orders, setOrders] = useState<OnlineOrder[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<Filter>('all')
@@ -171,15 +177,10 @@ function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; mani
 
   const loadOrders = async () => {
     setLoading(true); setError('')
-    if (manifest && profile.role === 'admin') {
-      try { setOrders(await loadAllStaticOrders(manifest)); setLastSync(manifest.generated_at) }
-      catch { setError('전체 주문 데이터를 불러오지 못했습니다.') }
-      setLoading(false); return
-    }
     if (manifest && profile.store_code) {
       const store = manifest.stores.find((item) => item.store_code === profile.store_code)
       if (!store) { setError('점포 정보를 찾지 못했습니다.'); setLoading(false); return }
-      try { setOrders(await loadStaticStoreOrders(store)); setLastSync(manifest.generated_at) }
+      try { setOrders(await loadStaticStoreOrders(store, manifest.version)); setLastSync(manifest.generated_at) }
       catch { setError('점포 주문 파일을 불러오지 못했습니다.') }
       setLoading(false); return
     }
@@ -215,14 +216,14 @@ function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; mani
     <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
       <div className="brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="" /></span><span>타사 온라인 예외관리</span></div>
       <nav><p>WORKSPACE</p><button className="active"><LayoutDashboard size={19} />주문 현황</button>{profile.role === 'admin' && !manifest && <><button onClick={() => setUploadOpen(true)}><FileSpreadsheet size={19} />엑셀 동기화</button><button onClick={() => setSettingsOpen(true)}><Settings2 size={19} />처리기한 설정</button></>}</nav>
-      <div className="sidebar-bottom"><div className="sla-mini"><Clock3 size={17} /><div><span>처리기한 기준</span><strong>등록 후 {slaDays.shipping}일 · 출고 후 {slaDays.settlement}일</strong></div></div><button className="logout" onClick={onLogout}><LogOut size={17} />로그아웃</button></div>
+      <div className="sidebar-bottom"><div className="sla-mini"><Clock3 size={17} /><div><span>처리기한 기준</span><strong>등록 후 {slaDays.shipping}일 · 출고 후 {slaDays.settlement}일</strong></div></div>{onBack && <button className="logout" onClick={onBack}><ArrowLeft size={17} />점포 선택으로</button>}<button className="logout" onClick={onLogout}><LogOut size={17} />로그아웃</button></div>
     </aside>
     {mobileNav && <button className="nav-scrim" onClick={() => setMobileNav(false)} aria-label="메뉴 닫기" />}
     <main className="dashboard">
-      <header className="topbar"><button className="menu-button" onClick={() => setMobileNav(true)}><Menu /></button><div><span className="location-label">현재 조회 매장</span><strong>{profile.role === 'admin' ? '전체 매장' : storeLabel} <ChevronDown size={15} /></strong></div><div className="profile-chip"><span>{profile.role === 'admin' ? profile.display_name.slice(0, 1) : storeLabel.slice(0, 1)}</span><div><strong>{profile.role === 'admin' ? profile.display_name : storeLabel}</strong><small>{profile.role === 'admin' ? 'Administrator' : '매장'}</small></div></div></header>
+      <header className="topbar"><button className="menu-button" onClick={() => setMobileNav(true)}><Menu /></button><div><span className="location-label">현재 조회 매장</span><strong>{storeLabel} <ChevronDown size={15} /></strong></div><div className="profile-chip"><span>{profile.role === 'admin' ? 'M' : storeLabel.slice(0, 1)}</span><div><strong>{profile.role === 'admin' ? '마스터' : storeLabel}</strong><small>{profile.role === 'admin' ? 'Master' : '매장'}</small></div></div></header>
       <div className="content">
-        <section className="page-heading"><div><p className="eyebrow">ORDER EXCEPTIONS</p><h1>타사 온라인 주문 현황</h1><p>{profile.role === 'admin' ? `전체 매장의 처리 지연 건을 우선 확인하세요.${lastSync ? ` · 마지막 동기화 ${formatDate(lastSync)}` : ''}` : `${storeLabel}의 처리가 필요한 주문을 확인하세요.`}</p></div><div className="heading-actions"><button className="secondary-button" onClick={loadOrders}><RefreshCw size={16} />새로고침</button>{profile.role === 'admin' && !manifest && <button className="primary-button compact" onClick={() => setUploadOpen(true)}><UploadCloud size={17} />엑셀 업로드</button>}</div></section>
-        {manifest && <div className="demo-banner"><Check size={17} /><span><strong>{profile.role === 'admin' ? '마스터 전체 데이터로 조회 중입니다.' : '점포 전용 데이터로 조회 중입니다.'}</strong> 마지막 갱신 {formatDate(manifest.generated_at)}</span></div>}
+        <section className="page-heading"><div><p className="eyebrow">ORDER EXCEPTIONS</p><h1>타사 온라인 주문 현황</h1><p>{storeLabel}의 확인이 필요한 주문을 살펴보세요.{lastSync ? ` · 마지막 갱신 ${formatDate(lastSync)}` : ''}</p></div><div className="heading-actions"><button className="secondary-button" onClick={loadOrders}><RefreshCw size={16} />새로고침</button>{profile.role === 'admin' && !manifest && <button className="primary-button compact" onClick={() => setUploadOpen(true)}><UploadCloud size={17} />엑셀 업로드</button>}</div></section>
+        {manifest && <div className="demo-banner"><Check size={17} /><span><strong>{profile.role === 'admin' ? '마스터 점포 조회 중입니다.' : '점포 전용 데이터로 조회 중입니다.'}</strong> 마지막 갱신 {formatDate(manifest.generated_at)}</span></div>}
         {!manifest && !isSupabaseConfigured && <div className="demo-banner"><CircleAlert size={17} /><span><strong>데모 데이터로 표시 중입니다.</strong></span></div>}
         {error && <div className="form-error page-error"><CircleAlert size={16} />{error}</div>}
         <section className="metrics">
@@ -233,7 +234,7 @@ function Dashboard({ profile, manifest, onLogout }: { profile: UserProfile; mani
         </section>
         <section className="orders-panel">
           <div className="panel-toolbar"><div><h2>{filterLabels[filter]}</h2><span>{visible.length}건</span></div><div className="search-box"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="주문번호, 브랜드, 상품명 검색" /></div></div>
-          <OrderTable orders={visible} loading={loading} showStore={profile.role === 'admin'} />
+          <OrderTable orders={visible} loading={loading} showStore={false} />
         </section>
       </div>
     </main>
