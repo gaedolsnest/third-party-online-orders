@@ -209,6 +209,12 @@ function Dashboard({ profile, manifest, onBack, onLogout }: { profile: UserProfi
     const matchFilter = filter === 'all' || (filter === 'warning' || filter === 'complete' ? order.slaLevel === filter : order.slaLevel === 'delayed' && order.exceptionType === filter)
     const needle = query.trim().toLowerCase()
     return matchFilter && (!needle || [order.order_no, order.store_name, order.brand, order.product_name, order.store_code].some((value) => value.toLowerCase().includes(needle)))
+  }).sort((a, b) => {
+    const delayedPriority = Number(a.slaLevel !== 'delayed') - Number(b.slaLevel !== 'delayed')
+    if (delayedPriority !== 0) return delayedPriority
+    const dueDifference = (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
+    if (dueDifference !== 0) return dueDifference
+    return new Date(a.registered_at).getTime() - new Date(b.registered_at).getTime()
   }), [enriched, filter, query])
   const counts = useMemo(() => ({ shipping: enriched.filter((o) => o.slaLevel === 'delayed' && o.exceptionType === 'shipping_delay').length, settlement: enriched.filter((o) => o.slaLevel === 'delayed' && o.exceptionType === 'settlement_delay').length, warning: enriched.filter((o) => o.slaLevel === 'warning').length, complete: enriched.filter((o) => o.slaLevel === 'complete').length }), [enriched])
 

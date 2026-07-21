@@ -7,6 +7,12 @@ const addDays = (value: string, days: number) => {
   return Number.isNaN(date.getTime()) ? null : new Date(date.getTime() + days * DAY)
 }
 
+const startOfDay = (value: Date) => {
+  const date = new Date(value)
+  date.setHours(0, 0, 0, 0)
+  return date
+}
+
 export function withSla(order: OnlineOrder, now = new Date(), shippingDays = 2, settlementDays = 5): OrderWithSla {
   if (order.status === '정산' || order.settled_at) {
     return { ...order, slaLevel: 'complete', slaLabel: '처리 완료', dueAt: null, exceptionType: null }
@@ -20,13 +26,14 @@ export function withSla(order: OnlineOrder, now = new Date(), shippingDays = 2, 
   const stageLabel = isRegistered ? '출고' : '정산'
 
   if (!dueAt) return { ...order, slaLevel: 'normal', slaLabel: '확인 필요', dueAt: null, exceptionType }
-  const remaining = dueAt.getTime() - now.getTime()
-  if (remaining < 0) {
-    const overdueDays = Math.max(1, Math.ceil(Math.abs(remaining) / DAY))
+  const remainingDays = Math.round((startOfDay(dueAt).getTime() - startOfDay(now).getTime()) / DAY)
+  if (remainingDays < 0) {
+    const overdueDays = Math.abs(remainingDays)
     return { ...order, slaLevel: 'delayed', slaLabel: `${stageLabel} ${overdueDays}일 지연`, dueAt, exceptionType }
   }
-  if (remaining <= DAY) return { ...order, slaLevel: 'warning', slaLabel: `${stageLabel} 임박`, dueAt, exceptionType }
-  return { ...order, slaLevel: 'normal', slaLabel: `${stageLabel} 정상`, dueAt, exceptionType }
+  if (remainingDays === 0) return { ...order, slaLevel: 'warning', slaLabel: `${stageLabel} D-DAY`, dueAt, exceptionType }
+  if (remainingDays === 1) return { ...order, slaLevel: 'warning', slaLabel: `${stageLabel} 임박`, dueAt, exceptionType }
+  return { ...order, slaLevel: 'normal', slaLabel: `${order.status} 완료`, dueAt, exceptionType }
 }
 
 export const formatDate = (value: string | Date | null | undefined) => {

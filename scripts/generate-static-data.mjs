@@ -138,11 +138,12 @@ const storeByName = new Map(master.stores.map((store) => [normalize(store.store_
 const unmatched = [...new Set(source.orders.filter((order) => !storeByName.has(normalize(order.store_name))).map((order) => order.store_name))]
 if (unmatched.length) throw new Error(`점포마스터 미매칭 ${unmatched.length}개: ${unmatched.slice(0, 10).join(', ')}`)
 const excludedStores = master.stores.filter((store) => store.store_name.includes('반품매장'))
-const visibleStores = master.stores.filter((store) => !store.store_name.includes('반품매장'))
 const excludedNames = new Set(excludedStores.map((store) => normalize(store.store_name)))
 const resolved = source.orders
   .filter((order) => !excludedNames.has(normalize(order.store_name)))
   .map((order) => ({ ...order, store_code: storeByName.get(normalize(order.store_name)).store_code }))
+const activeStoreCodes = new Set(resolved.map((order) => order.store_code))
+const visibleStores = master.stores.filter((store) => activeStoreCodes.has(store.store_code))
 const sourceHash = createHash('sha256').update(readFileSync(masterPath)).update(readFileSync(ordersPath)).digest('hex')
 const version = sourceHash.slice(0, 12)
 const previousManifestPath = join(outputPath, 'manifest.json')
