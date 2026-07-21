@@ -121,7 +121,12 @@ const source = parseOrders()
 const storeByName = new Map(master.stores.map((store) => [normalize(store.store_name), store]))
 const unmatched = [...new Set(source.orders.filter((order) => !storeByName.has(normalize(order.store_name))).map((order) => order.store_name))]
 if (unmatched.length) throw new Error(`점포마스터 미매칭 ${unmatched.length}개: ${unmatched.slice(0, 10).join(', ')}`)
-const resolved = source.orders.map((order) => ({ ...order, store_code: storeByName.get(normalize(order.store_name)).store_code }))
+const excludedStores = master.stores.filter((store) => store.store_name.includes('반품매장'))
+const visibleStores = master.stores.filter((store) => !store.store_name.includes('반품매장'))
+const excludedNames = new Set(excludedStores.map((store) => normalize(store.store_name)))
+const resolved = source.orders
+  .filter((order) => !excludedNames.has(normalize(order.store_name)))
+  .map((order) => ({ ...order, store_code: storeByName.get(normalize(order.store_name)).store_code }))
 const sourceHash = createHash('sha256').update(readFileSync(masterPath)).update(readFileSync(ordersPath)).digest('hex')
 const version = sourceHash.slice(0, 12)
 const previousManifestPath = join(outputPath, 'manifest.json')
@@ -135,7 +140,7 @@ const storesPath = join(outputPath, 'stores')
 rmSync(outputPath, { recursive: true, force: true })
 mkdirSync(storesPath, { recursive: true })
 const grouped = Map.groupBy(resolved, (order) => order.store_code)
-const manifestStores = master.stores.sort((a, b) => a.store_name.localeCompare(b.store_name, 'ko')).map((store) => {
+const manifestStores = visibleStores.sort((a, b) => a.store_name.localeCompare(b.store_name, 'ko')).map((store) => {
   const orders = grouped.get(store.store_code) || []
   const file = orders.length ? `stores/${createHash('sha256').update(`${version}:${store.store_code}`).digest('hex').slice(0, 20)}.json` : null
   if (file) writeFileSync(join(outputPath, file), JSON.stringify({ version, generated_at: generatedAt, store, orders }))
@@ -143,4 +148,4 @@ const manifestStores = master.stores.sort((a, b) => a.store_name.localeCompare(b
 })
 const manifest = { version, generated_at: generatedAt, source: { master_sheet: master.sheetName, orders_sheet: source.sheetName }, total_orders: resolved.length, ignored_completed: source.ignoredCompleted, stores: manifestStores }
 writeFileSync(join(outputPath, 'manifest.json'), JSON.stringify(manifest))
-console.log(JSON.stringify({ output: outputPath, version, stores: master.stores.length, stores_with_orders: grouped.size, open_orders: resolved.length, ignored_completed: source.ignoredCompleted }, null, 2))
+console.log(JSON.stringify({ output: outputPath, version, stores: visibleStores.length, excluded_return_stores: excludedStores.length, stores_with_orders: grouped.size, open_orders: resolved.length, ignored_completed: source.ignoredCompleted }, null, 2))
