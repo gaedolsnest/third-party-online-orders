@@ -63,7 +63,8 @@ function Login({ manifest, onLogin }: { manifest: StaticManifest | null; onLogin
   useEffect(() => {
     const openMasterLogin = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { setMasterOpen(false); return }
-      if (!event.ctrlKey || !event.shiftKey || event.key.toLowerCase() !== 'm') return
+      const isMasterShortcut = event.ctrlKey && (event.altKey || event.shiftKey) && event.key.toLowerCase() === 'm'
+      if (!isMasterShortcut) return
       event.preventDefault()
       setMasterPassword('')
       setMasterError('')
