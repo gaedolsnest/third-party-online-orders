@@ -9,6 +9,7 @@ type InstallPromptEvent = Event & {
   prompt: () => Promise<void>
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
 }
+type InstallWindow = Window & { __ledgerInstallPrompt?: InstallPromptEvent | null }
 const filterLabels: Record<Filter, string> = { all: '전체 예외', shipping_delay: '출고 지연', settlement_delay: '정산 지연', warning: 'D-DAY · 임박' }
 const emptyLedger: LedgerState = { version: 1, orders: [], latest_store_names: [], last_upload: null }
 type LedgerOrderWithSla = OrderWithSla & LedgerOrder
@@ -41,30 +42,46 @@ function LedgerApp() {
   }, [])
 
   useEffect(() => {
+    const installWindow = window as InstallWindow
     const handlePrompt = (event: Event) => {
       event.preventDefault()
-      setInstallPrompt(event as InstallPromptEvent)
+      const prompt = event as InstallPromptEvent
+      installWindow.__ledgerInstallPrompt = prompt
+      setInstallPrompt(prompt)
       setInstallMessage('')
     }
+    const handleReady = () => {
+      if (installWindow.__ledgerInstallPrompt) {
+        setInstallPrompt(installWindow.__ledgerInstallPrompt)
+        setInstallMessage('')
+      }
+    }
     const handleInstalled = () => {
+      installWindow.__ledgerInstallPrompt = null
       setInstallPrompt(null)
       setInstallMessage('설치가 완료되었습니다. 바탕화면이나 시작 메뉴에서 앱을 실행해 주세요.')
     }
+    handleReady()
     window.addEventListener('beforeinstallprompt', handlePrompt)
+    window.addEventListener('ledger-install-ready', handleReady)
     window.addEventListener('appinstalled', handleInstalled)
     return () => {
       window.removeEventListener('beforeinstallprompt', handlePrompt)
+      window.removeEventListener('ledger-install-ready', handleReady)
       window.removeEventListener('appinstalled', handleInstalled)
     }
   }, [])
 
   const installApp = async () => {
-    if (!installPrompt) {
-      setInstallMessage('Chrome 또는 Edge에서 새로고침한 뒤 다시 눌러 주세요. 주소창 오른쪽의 설치 아이콘으로도 설치할 수 있습니다.')
+    const installWindow = window as InstallWindow
+    const prompt = installPrompt || installWindow.__ledgerInstallPrompt
+    if (!prompt) {
+      setInstallMessage('설치 준비가 완료되지 않았습니다. 페이지를 새로고침한 뒤 PC에 앱 설치 버튼을 다시 눌러 주세요.')
       return
     }
-    await installPrompt.prompt()
-    const choice = await installPrompt.userChoice
+    await prompt.prompt()
+    const choice = await prompt.userChoice
+    installWindow.__ledgerInstallPrompt = null
     setInstallPrompt(null)
     setInstallMessage(choice.outcome === 'accepted'
       ? '설치가 완료되었습니다. 바탕화면이나 시작 메뉴에서 앱을 실행해 주세요.'

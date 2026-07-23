@@ -1,4 +1,4 @@
-const CACHE_NAME = 'third-party-ledger-shell-v2'
+const CACHE_NAME = 'third-party-ledger-shell-v3'
 const APP_SHELL = ['./', './abc-mart-black.svg', './ledger-icon-192.png', './ledger-icon-512.png', './ledger.webmanifest']
 
 self.addEventListener('install', (event) => {
