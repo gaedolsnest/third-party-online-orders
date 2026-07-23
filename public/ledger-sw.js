@@ -21,6 +21,14 @@ self.addEventListener('fetch', (event) => {
     }).catch(() => caches.match('./')))
     return
   }
+  if (event.request.destination === 'manifest') {
+    event.respondWith(fetch(event.request).then((response) => {
+      const copy = response.clone()
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
+      return response
+    }).catch(() => caches.match(event.request)))
+    return
+  }
   if (!['script', 'style', 'image', 'font', 'manifest'].includes(event.request.destination)) return
   event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
     const copy = response.clone()
