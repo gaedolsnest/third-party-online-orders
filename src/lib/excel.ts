@@ -33,6 +33,25 @@ const normalized = (value: unknown) => String(value ?? '').replace(/\s+/g, '').t
 const text = (value: unknown) => String(value ?? '').trim()
 const number = (value: unknown, fallback = 0) => Number(String(value ?? '').replace(/,/g, '')) || fallback
 
+/**
+ * 일부 인트라넷 내보내기 파일은 실제 데이터가 12행 이후에도 있는데 !ref가
+ * A1:AB11처럼 잘못 저장된다. SheetJS 변환 전에 실제 셀 주소로 범위를 복구한다.
+ */
+function matrixFromSheet(sheet: XLSX.WorkSheet): SheetMatrix {
+  const cellAddresses = Object.keys(sheet).filter((address) => !address.startsWith('!'))
+  if (cellAddresses.length) {
+    const cells = cellAddresses.map((address) => XLSX.utils.decode_cell(address))
+    const merges = sheet['!merges'] || []
+    const rows = cells.map((cell) => cell.r).concat(merges.flatMap((merge) => [merge.s.r, merge.e.r]))
+    const columns = cells.map((cell) => cell.c).concat(merges.flatMap((merge) => [merge.s.c, merge.e.c]))
+    sheet['!ref'] = XLSX.utils.encode_range({
+      s: { r: Math.min(...rows), c: Math.min(...columns) },
+      e: { r: Math.max(...rows), c: Math.max(...columns) },
+    })
+  }
+  return XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true }) as SheetMatrix
+}
+
 const get = (row: SheetRow, field: string) => {
   const found = Object.keys(row).find((key) => names[field].some((name) => normalized(name) === normalized(key)))
   return found ? row[found] : ''
@@ -104,11 +123,21 @@ function extractMetadata(matrix: SheetMatrix, headerRow: number): Omit<ExcelMeta
       if (storeMatch && !storeName) {
         storeName = text(storeMatch[1]) || text(row.slice(column + 1).find((value) => text(value)))
       }
+      const storePathMatch = raw.match(/점구분\s*\/\s*점\s*[:：]\s*(.+)$/)
+      if (storePathMatch && !storeName) {
+        const path = storePathMatch[1].split('/').map(text).filter(Boolean)
+        const candidate = path.at(-1) || ''
+        if (candidate && !candidate.includes('전체')) storeName = candidate
+      }
       if (row[column] instanceof Date) {
         const parsed = date(row[column])
         if (parsed) sourceDates.add(parsed)
       } else {
         for (const match of raw.matchAll(/(20\d{2})[.\/-](\d{1,2})[.\/-](\d{1,2})/g)) {
+          const parsed = date(`${match[1]}-${match[2]}-${match[3]}`)
+          if (parsed) sourceDates.add(parsed)
+        }
+        for (const match of raw.matchAll(/(?<!\d)(20\d{2})(\d{2})(\d{2})(?!\d)/g)) {
           const parsed = date(`${match[1]}-${match[2]}-${match[3]}`)
           if (parsed) sourceDates.add(parsed)
         }
@@ -119,7 +148,7 @@ function extractMetadata(matrix: SheetMatrix, headerRow: number): Omit<ExcelMeta
 }
 
 export function parseOrderSheet(sheet: XLSX.WorkSheet, options: { includeCompleted?: boolean; defaultStoreName?: string } = {}): OnlineOrder[] {
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true }) as SheetMatrix
+  const matrix = matrixFromSheet(sheet)
   if (!matrix.length) throw new Error('엑셀 파일에 데이터가 없습니다.')
   const { headerRow, hasSecondHeader, dataRow } = locateHeaders(matrix)
   const metadata = extractMetadata(matrix, headerRow)
@@ -175,7 +204,7 @@ export async function parseLedgerExcel(file: File): Promise<ParsedLedgerExcel> {
   const sheetName = workbook.SheetNames[0]
   const sheet = workbook.Sheets[sheetName]
   if (!sheet) throw new Error('첫 번째 시트를 읽을 수 없습니다.')
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true }) as SheetMatrix
+  const matrix = matrixFromSheet(sheet)
   const { headerRow } = locateHeaders(matrix)
   const metadata = { ...extractMetadata(matrix, headerRow), sheet_name: sheetName }
   return {
