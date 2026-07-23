@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { AlertTriangle, ArrowDownToLine, Check, CircleAlert, Clock3, FileDown, FileSpreadsheet, MonitorDown, PackageCheck, RefreshCw, Search, ShieldCheck, Store, Trash2, UploadCloud } from 'lucide-react'
 import { clearLedger, mergeLedger, readLedger, updateOrderHandling, writeLedger, type HandlingStatus, type LedgerOrder, type LedgerState } from './lib/ledgerDb'
 import { formatDate, withSla } from './lib/sla'
@@ -27,6 +27,8 @@ function LedgerApp() {
   const [activeStore, setActiveStore] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
+  const [includeCompleted, setIncludeCompleted] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
   const [installMessage, setInstallMessage] = useState('')
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
@@ -105,7 +107,7 @@ function LedgerApp() {
       ledgerRef.current = next
       setLedger(next)
       setActiveStore((current) => next.latest_store_names.includes(current) ? current : next.latest_store_names[0] || '')
-      setFilter('all'); setQuery('')
+      setFilter('all'); setQuery(''); setIncludeCompleted(false)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Excel을 불러오지 못했습니다.')
     } finally {
@@ -118,7 +120,7 @@ function LedgerApp() {
     if (!window.confirm('이 PC에 저장된 주문 대장을 모두 초기화할까요? 원본 Excel은 삭제되지 않습니다.')) return
     await clearLedger()
     ledgerRef.current = emptyLedger
-    setLedger(emptyLedger); setActiveStore(''); setFilter('all'); setQuery('')
+    setLedger(emptyLedger); setActiveStore(''); setFilter('all'); setQuery(''); setIncludeCompleted(false)
   }
 
   const saveHandling = async (order: LedgerOrder, patch: Partial<Pick<LedgerOrder, 'handling_status' | 'handling_memo'>>) => {
@@ -146,16 +148,42 @@ function LedgerApp() {
     }
   }
 
-  const storeOrders = useMemo(() => ledger.orders.filter((order) => order.store_name === activeStore && !order.missing_from_latest && order.status !== '정산'), [ledger.orders, activeStore])
+  const dragProps = {
+    onDragEnter: (event: DragEvent<HTMLElement>) => {
+      if (event.dataTransfer.types.includes('Files')) {
+        event.preventDefault()
+        setDragActive(true)
+      }
+    },
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (event.dataTransfer.types.includes('Files')) {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }
+    },
+    onDragLeave: (event: DragEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false)
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      event.preventDefault()
+      setDragActive(false)
+      void importExcel(event.dataTransfer.files[0])
+    },
+  }
+
+  const storeOrders = useMemo(() => ledger.orders.filter((order) => order.store_name === activeStore && !order.missing_from_latest && (includeCompleted || order.status !== '정산')), [ledger.orders, activeStore, includeCompleted])
   const enriched = useMemo(() => storeOrders.map((order) => withSla(order) as LedgerOrderWithSla), [storeOrders])
   const visible = useMemo(() => enriched.filter((order) => {
     const matchesFilter = filter === 'all' || (filter === 'warning' ? order.slaLevel === 'warning' : order.slaLevel === 'delayed' && order.exceptionType === filter)
     const needle = query.trim().toLowerCase()
     return matchesFilter && (!needle || [order.order_no, order.brand, order.product_name, order.style_code].some((value) => value.toLowerCase().includes(needle)))
   }).sort((a, b) => {
-    const priority = Number(a.slaLevel !== 'delayed') - Number(b.slaLevel !== 'delayed')
+    const rank = { delayed: 0, warning: 1, normal: 2, complete: 3 }
+    const priority = rank[a.slaLevel] - rank[b.slaLevel]
     if (priority) return priority
-    return (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
+    const dueOrder = (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
+    if (dueOrder) return dueOrder
+    return new Date(b.registered_at).getTime() - new Date(a.registered_at).getTime()
   }), [enriched, filter, query])
   const counts = useMemo(() => ({
     shipping: enriched.filter((order) => order.slaLevel === 'delayed' && order.exceptionType === 'shipping_delay').length,
@@ -178,7 +206,8 @@ function LedgerApp() {
 
   if (booting) return <div className="center-screen"><div className="loader" /><span>이 PC의 주문 대장을 불러오는 중입니다.</span></div>
 
-  if (!ledger.last_upload) return <main className="ledger-empty-page">
+  if (!ledger.last_upload) return <main className={`ledger-empty-page ${dragActive ? 'is-dragging' : ''}`} {...dragProps}>
+    {dragActive && <div className="ledger-drop-overlay"><UploadCloud /><strong>Excel 파일을 여기에 놓아주세요</strong><span>파일은 이 PC에서만 처리됩니다.</span></div>}
     <section className="ledger-empty-card">
       <div className="brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="ABC-MART" /></span><span>타사 온라인 대장관리</span></div>
       <div className="ledger-empty-icon"><FileSpreadsheet /></div>
@@ -192,7 +221,8 @@ function LedgerApp() {
     </section>
   </main>
 
-  return <main className="ledger-page">
+  return <main className={`ledger-page ${dragActive ? 'is-dragging' : ''}`} {...dragProps}>
+    {dragActive && <div className="ledger-drop-overlay"><UploadCloud /><strong>Excel 파일을 여기에 놓아주세요</strong><span>오늘 데이터와 대장을 동기화합니다.</span></div>}
     <header className="ledger-topbar">
       <div className="brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="ABC-MART" /></span><span>타사 온라인 대장관리</span></div>
       <div className="ledger-actions">
@@ -205,7 +235,7 @@ function LedgerApp() {
     <div className="ledger-content">
       <section className="ledger-heading">
         <div><p className="eyebrow">LOCAL ORDER LEDGER</p><h1>{activeStore || '점포 선택'} 주문 대장</h1><p>최근 불러온 파일 · {ledger.last_upload.file_name} · {formatDate(ledger.last_upload.uploaded_at)}</p></div>
-        {ledger.latest_store_names.length > 1 && <label className="ledger-store-select"><Store size={16} /><select value={activeStore} onChange={(event) => { setActiveStore(event.target.value); setFilter('all'); setQuery('') }}>{ledger.latest_store_names.map((store) => <option key={store}>{store}</option>)}</select></label>}
+        {ledger.latest_store_names.length > 1 && <label className="ledger-store-select"><Store size={16} /><select value={activeStore} onChange={(event) => { setActiveStore(event.target.value); setFilter('all'); setQuery(''); setIncludeCompleted(false) }}>{ledger.latest_store_names.map((store) => <option key={store}>{store}</option>)}</select></label>}
       </section>
 
       <section className="ledger-sync-card">
@@ -218,14 +248,14 @@ function LedgerApp() {
 
       {error && <div className="form-error page-error"><CircleAlert size={16} />{error}</div>}
       <section className="metrics ledger-metrics">
-        <button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}><div className="metric-icon dark"><ArrowDownToLine /></div><span>전체 주문</span><strong>{enriched.length}<small>건</small></strong><p>현재 미완료</p></button>
+        <button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}><div className="metric-icon dark"><ArrowDownToLine /></div><span>{includeCompleted ? '전체 주문' : '진행 중 주문'}</span><strong>{enriched.length}<small>건</small></strong><p>{includeCompleted ? '정산 완료 포함' : '현재 미완료'}</p></button>
         <button className={`danger ${filter === 'shipping_delay' ? 'selected' : ''}`} onClick={() => setFilter('shipping_delay')}><div className="metric-icon red"><AlertTriangle /></div><span>출고 지연</span><strong>{counts.shipping}<small>건</small></strong><p>등록 2일 초과</p></button>
         <button className={`danger ${filter === 'settlement_delay' ? 'selected' : ''}`} onClick={() => setFilter('settlement_delay')}><div className="metric-icon amber"><Clock3 /></div><span>정산 지연</span><strong>{counts.settlement}<small>건</small></strong><p>출고 5일 초과</p></button>
         <button className={filter === 'warning' ? 'selected' : ''} onClick={() => setFilter('warning')}><div className="metric-icon green"><Clock3 /></div><span>D-DAY · 임박</span><strong>{counts.warning}<small>건</small></strong><p>처리기한 1일 이내</p></button>
       </section>
 
       <section className="orders-panel">
-        <div className="panel-toolbar"><div><h2>{filterLabels[filter]}</h2><span>{visible.length}건</span></div><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="주문번호, 브랜드, 상품명 검색" /></div></div>
+        <div className="panel-toolbar"><div><h2>{filterLabels[filter]}</h2><span>{visible.length}건</span></div><div className="ledger-panel-tools"><label className="completed-toggle"><input type="checkbox" checked={includeCompleted} onChange={(event) => { setIncludeCompleted(event.target.checked); setFilter('all') }} /><span>정산 완료 포함</span></label><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="주문번호, 브랜드, 상품명 검색" /></div></div></div>
         <LedgerTable orders={visible} onHandlingChange={saveHandling} />
       </section>
       <div className="ledger-footer-note"><ShieldCheck size={14} />이 대장은 현재 브라우저의 IndexedDB에만 저장됩니다.</div>
@@ -235,7 +265,7 @@ function LedgerApp() {
 
 function LedgerTable({ orders, onHandlingChange }: { orders: LedgerOrderWithSla[]; onHandlingChange: (order: LedgerOrder, patch: Partial<Pick<LedgerOrder, 'handling_status' | 'handling_memo'>>) => Promise<void> }) {
   if (!orders.length) return <div className="table-empty"><PackageCheck size={28} /><strong>조건에 맞는 주문이 없습니다.</strong><span>필터나 검색어를 변경해 보세요.</span></div>
-  return <div className="table-scroll"><table className="ledger-orders-table"><thead><tr><th>기한 상태</th><th>매장 처리</th><th>처리 메모</th><th>주문번호 / 순번</th><th>브랜드 / 상품</th><th>등록일</th><th>출고일</th><th>처리기한</th><th>진행상태</th><th>발송 구분</th></tr></thead><tbody>{orders.map((order) => <tr key={`${order.store_name}-${order.order_no}-${order.line_no}`} className={order.slaLevel === 'delayed' ? 'row-delayed' : ''}><td><span className={`sla-badge ${order.slaLevel}`}>{order.slaLevel === 'delayed' && <AlertTriangle size={13} />}{order.slaLabel}</span></td><td><select className={`handling-select handling-${(order.handling_status || '미확인').replace(/\s/g, '-')}`} value={order.handling_status || '미확인'} onChange={(event) => void onHandlingChange(order, { handling_status: event.target.value as HandlingStatus })}><option>미확인</option><option>확인 중</option><option>조치 완료</option></select></td><td><input className="handling-memo" defaultValue={order.handling_memo || ''} placeholder="메모 입력" onBlur={(event) => { if (event.target.value !== (order.handling_memo || '')) void onHandlingChange(order, { handling_memo: event.target.value }) }} /></td><td><strong className="order-no">{order.order_no}</strong><small className="line-no">#{order.line_no}</small></td><td><div className="product-cell"><strong>{order.brand || '—'}</strong><span>{order.product_name} · {order.quantity}개</span></div></td><td>{formatDate(order.registered_at)}</td><td>{formatDate(order.shipped_at)}</td><td className={order.slaLevel === 'delayed' ? 'red-text' : ''}>{formatDate(order.dueAt)}</td><td><span className="status-dot" />{order.status}</td><td>{order.shipping_type || '—'}</td></tr>)}</tbody></table></div>
+  return <div className="table-scroll"><table className="ledger-orders-table"><thead><tr><th>기한 상태</th><th>매장 처리</th><th>처리 메모</th><th>주문번호 / 순번</th><th>브랜드 / 상품</th><th>등록일</th><th>출고일</th><th>처리기한</th><th>진행상태</th><th>발송 구분</th></tr></thead><tbody>{orders.map((order) => <tr key={`${order.store_name}-${order.order_no}-${order.line_no}-${order.registered_at}`} className={order.slaLevel === 'delayed' ? 'row-delayed' : ''}><td><span className={`sla-badge ${order.slaLevel}`}>{order.slaLevel === 'delayed' && <AlertTriangle size={13} />}{order.slaLabel}</span></td><td><select className={`handling-select handling-${(order.handling_status || '미확인').replace(/\s/g, '-')}`} value={order.handling_status || '미확인'} onChange={(event) => void onHandlingChange(order, { handling_status: event.target.value as HandlingStatus })}><option>미확인</option><option>확인 중</option><option>조치 완료</option></select></td><td><input className="handling-memo" defaultValue={order.handling_memo || ''} placeholder="메모 입력" onBlur={(event) => { if (event.target.value !== (order.handling_memo || '')) void onHandlingChange(order, { handling_memo: event.target.value }) }} /></td><td><strong className="order-no">{order.order_no}</strong><small className="line-no">#{order.line_no}</small></td><td><div className="product-cell"><strong>{order.brand || '—'}</strong><span>{order.product_name} · {order.quantity}개</span></div></td><td>{formatDate(order.registered_at)}</td><td>{formatDate(order.shipped_at)}</td><td className={order.slaLevel === 'delayed' ? 'red-text' : ''}>{formatDate(order.dueAt)}</td><td><span className="status-dot" />{order.status}</td><td>{order.shipping_type || '—'}</td></tr>)}</tbody></table></div>
 }
 
 export default LedgerApp

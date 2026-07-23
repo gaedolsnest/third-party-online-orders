@@ -190,7 +190,7 @@ export function parseOrderSheet(sheet: XLSX.WorkSheet, options: { includeComplet
       pos_no: text(get(row, 'pos_no')), transaction_no: text(get(row, 'transaction_no')),
     }
   })
-  const unique = new Map(parsed.map((order) => [`${order.order_no}::${order.line_no}`, order]))
+  const unique = new Map(parsed.map((order) => [`${order.order_no}::${order.line_no}::${order.registered_at.slice(0, 10)}`, order]))
   return [...unique.values()]
 }
 

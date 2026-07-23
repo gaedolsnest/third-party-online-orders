@@ -39,7 +39,7 @@ export interface LedgerState {
 }
 
 const emptyState = (): LedgerState => ({ version: 1, orders: [], latest_store_names: [], last_upload: null })
-const orderKey = (order: Pick<OnlineOrder, 'store_name' | 'order_no' | 'line_no'>) => `${order.store_name}::${order.order_no}::${order.line_no}`
+const orderKey = (order: Pick<OnlineOrder, 'store_name' | 'order_no' | 'line_no' | 'registered_at'>) => `${order.store_name}::${order.order_no}::${order.line_no}::${order.registered_at.slice(0, 10)}`
 
 const requestResult = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
   request.onsuccess = () => resolve(request.result)
@@ -140,7 +140,7 @@ export function mergeLedger(previous: LedgerState, incoming: OnlineOrder[], file
 
 export function updateOrderHandling(
   state: LedgerState,
-  target: Pick<OnlineOrder, 'store_name' | 'order_no' | 'line_no'>,
+  target: Pick<OnlineOrder, 'store_name' | 'order_no' | 'line_no' | 'registered_at'>,
   patch: Partial<Pick<LedgerOrder, 'handling_status' | 'handling_memo'>>,
 ): LedgerState {
   const targetKey = orderKey(target)
