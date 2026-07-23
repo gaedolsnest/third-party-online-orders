@@ -124,7 +124,6 @@ function LedgerApp() {
       <button className="primary-button ledger-import-button" onClick={() => void installApp()}><MonitorDown size={18} />PC에 앱 설치</button>
       {installMessage && <div className="install-guide"><CircleAlert size={16} /><span>{installMessage}</span></div>}
       <div className="local-privacy"><ShieldCheck size={16} /><span>설치 후 바탕화면 또는 시작 메뉴의 아이콘으로 실행합니다.</span></div>
-      <a className="ledger-back-link" href="./">기존 점포 조회 화면으로</a>
     </section>
   </main>
 
@@ -141,7 +140,6 @@ function LedgerApp() {
       <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => void importExcel(event.target.files?.[0])} />
       <button className="primary-button ledger-import-button" disabled={uploading} onClick={() => inputRef.current?.click()}><UploadCloud size={18} />{uploading ? 'Excel 확인 중…' : '오늘 데이터 불러오기'}</button>
       <div className="local-privacy"><ShieldCheck size={16} /><span>선택한 파일과 대장은 GitHub나 외부 서버로 전송되지 않습니다.</span></div>
-      <a className="ledger-back-link" href="./">기존 점포 조회 화면으로</a>
     </section>
   </main>
 
