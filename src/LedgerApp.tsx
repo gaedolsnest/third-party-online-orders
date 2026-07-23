@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDownToLine, Check, CircleAlert, Clock3, FileSpreadsheet, PackageCheck, RefreshCw, Search, ShieldCheck, Store, Trash2, UploadCloud } from 'lucide-react'
+import { AlertTriangle, ArrowDownToLine, Check, CircleAlert, Clock3, FileSpreadsheet, MonitorDown, PackageCheck, RefreshCw, Search, ShieldCheck, Store, Trash2, UploadCloud } from 'lucide-react'
 import { clearLedger, mergeLedger, readLedger, writeLedger, type LedgerState } from './lib/ledgerDb'
 import { formatDate, withSla } from './lib/sla'
 import type { OrderWithSla } from './types'
 
 type Filter = 'all' | 'shipping_delay' | 'settlement_delay' | 'warning'
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
 const filterLabels: Record<Filter, string> = { all: '전체 예외', shipping_delay: '출고 지연', settlement_delay: '정산 지연', warning: 'D-DAY · 임박' }
 const emptyLedger: LedgerState = { version: 1, orders: [], latest_store_names: [], last_upload: null }
 
@@ -19,6 +23,10 @@ function LedgerApp() {
   const [activeStore, setActiveStore] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null)
+  const [installMessage, setInstallMessage] = useState('')
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+    || Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)
 
   useEffect(() => {
     document.title = '타사 온라인 대장관리'
@@ -27,6 +35,37 @@ function LedgerApp() {
       setActiveStore(state.latest_store_names[0] || '')
     }).catch(() => setError('이 브라우저의 대장을 불러오지 못했습니다.')).finally(() => setBooting(false))
   }, [])
+
+  useEffect(() => {
+    const handlePrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as InstallPromptEvent)
+      setInstallMessage('')
+    }
+    const handleInstalled = () => {
+      setInstallPrompt(null)
+      setInstallMessage('설치가 완료되었습니다. 바탕화면이나 시작 메뉴에서 앱을 실행해 주세요.')
+    }
+    window.addEventListener('beforeinstallprompt', handlePrompt)
+    window.addEventListener('appinstalled', handleInstalled)
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handlePrompt)
+      window.removeEventListener('appinstalled', handleInstalled)
+    }
+  }, [])
+
+  const installApp = async () => {
+    if (!installPrompt) {
+      setInstallMessage('Chrome 또는 Edge에서 새로고침한 뒤 다시 눌러 주세요. 주소창 오른쪽의 설치 아이콘으로도 설치할 수 있습니다.')
+      return
+    }
+    await installPrompt.prompt()
+    const choice = await installPrompt.userChoice
+    setInstallPrompt(null)
+    setInstallMessage(choice.outcome === 'accepted'
+      ? '설치가 완료되었습니다. 바탕화면이나 시작 메뉴에서 앱을 실행해 주세요.'
+      : '설치가 취소되었습니다. 필요할 때 다시 눌러 주세요.')
+  }
 
   const importExcel = async (file?: File) => {
     if (!file) return
@@ -74,6 +113,20 @@ function LedgerApp() {
     settlement: enriched.filter((order) => order.slaLevel === 'delayed' && order.exceptionType === 'settlement_delay').length,
     warning: enriched.filter((order) => order.slaLevel === 'warning').length,
   }), [enriched])
+
+  if (!isStandalone) return <main className="ledger-empty-page ledger-install-only">
+    <section className="ledger-empty-card ledger-install-card">
+      <div className="brand"><span className="brand-mark"><img src="./abc-mart-black.svg" alt="ABC-MART" /></span><span>타사 온라인 대장관리</span></div>
+      <div className="ledger-empty-icon"><MonitorDown /></div>
+      <p className="eyebrow">INSTALL LOCAL APP</p>
+      <h1>PC에 앱을<br />설치해 주세요.</h1>
+      <p>설치된 앱에서만 Excel을 불러오고 주문 대장을 관리할 수 있습니다. 선택한 파일과 대장은 이 PC에만 저장됩니다.</p>
+      <button className="primary-button ledger-import-button" onClick={() => void installApp()}><MonitorDown size={18} />PC에 앱 설치</button>
+      {installMessage && <div className="install-guide"><CircleAlert size={16} /><span>{installMessage}</span></div>}
+      <div className="local-privacy"><ShieldCheck size={16} /><span>설치 후 바탕화면 또는 시작 메뉴의 아이콘으로 실행합니다.</span></div>
+      <a className="ledger-back-link" href="./">기존 점포 조회 화면으로</a>
+    </section>
+  </main>
 
   if (booting) return <div className="center-screen"><div className="loader" /><span>이 PC의 주문 대장을 불러오는 중입니다.</span></div>
 

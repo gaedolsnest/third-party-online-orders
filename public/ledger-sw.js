@@ -1,5 +1,5 @@
-const CACHE_NAME = 'third-party-ledger-shell-v1'
-const APP_SHELL = ['./', './abc-mart-black.svg', './ledger.webmanifest']
+const CACHE_NAME = 'third-party-ledger-shell-v2'
+const APP_SHELL = ['./', './abc-mart-black.svg', './ledger-icon-192.png', './ledger-icon-512.png', './ledger.webmanifest']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)))
