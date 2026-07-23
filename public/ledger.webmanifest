@@ -1,0 +1,13 @@
+{
+  "name": "타사 온라인 대장관리",
+  "short_name": "온라인 대장",
+  "description": "점포 Excel을 이 PC에서만 처리하는 타사 온라인 주문 대장",
+  "start_url": "./#/ledger",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f9ff",
+  "theme_color": "#111827",
+  "icons": [
+    { "src": "./abc-mart-black.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

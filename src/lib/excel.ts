@@ -4,6 +4,17 @@ import type { OnlineOrder, OrderStatus } from '../types'
 type SheetRow = Record<string, unknown>
 type SheetMatrix = unknown[][]
 
+export interface ExcelMetadata {
+  store_name: string
+  source_dates: string[]
+  sheet_name: string
+}
+
+export interface ParsedLedgerExcel {
+  orders: OnlineOrder[]
+  metadata: ExcelMetadata
+}
+
 const names: Record<string, string[]> = {
   source_no: ['No', '번호', 'source_no'],
   source_flag: ['F', 'source_flag'],
@@ -83,22 +94,47 @@ function buildHeaders(sheet: XLSX.WorkSheet, matrix: SheetMatrix, headerRow: num
   return Array.from({ length: width }, (_, column) => text(bottom[column]) || text(top[column]) || `__column_${column}`)
 }
 
-export function parseOrderSheet(sheet: XLSX.WorkSheet): OnlineOrder[] {
+function extractMetadata(matrix: SheetMatrix, headerRow: number): Omit<ExcelMetadata, 'sheet_name'> {
+  let storeName = ''
+  const sourceDates = new Set<string>()
+  for (const row of matrix.slice(0, headerRow)) {
+    for (let column = 0; column < row.length; column += 1) {
+      const raw = text(row[column])
+      const storeMatch = raw.match(/^(?:점포명|매장명)\s*[:：]?\s*(.*)$/)
+      if (storeMatch && !storeName) {
+        storeName = text(storeMatch[1]) || text(row.slice(column + 1).find((value) => text(value)))
+      }
+      if (row[column] instanceof Date) {
+        const parsed = date(row[column])
+        if (parsed) sourceDates.add(parsed)
+      } else {
+        for (const match of raw.matchAll(/(20\d{2})[.\/-](\d{1,2})[.\/-](\d{1,2})/g)) {
+          const parsed = date(`${match[1]}-${match[2]}-${match[3]}`)
+          if (parsed) sourceDates.add(parsed)
+        }
+      }
+    }
+  }
+  return { store_name: storeName, source_dates: [...sourceDates].sort() }
+}
+
+export function parseOrderSheet(sheet: XLSX.WorkSheet, options: { includeCompleted?: boolean; defaultStoreName?: string } = {}): OnlineOrder[] {
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true }) as SheetMatrix
   if (!matrix.length) throw new Error('엑셀 파일에 데이터가 없습니다.')
   const { headerRow, hasSecondHeader, dataRow } = locateHeaders(matrix)
+  const metadata = extractMetadata(matrix, headerRow)
   const headers = buildHeaders(sheet, matrix, headerRow, hasSecondHeader)
   const rows = matrix.slice(dataRow)
     .map((values) => Object.fromEntries(headers.map((header, column) => [header, values[column] ?? ''])))
     .filter((row) => Object.values(row).some((value) => text(value)))
     .filter((row) => text(get(row, 'status')))
-    // 정산 완료 행은 예외 대상이 아니므로 정적 배포 데이터에 포함하지 않는다.
-    .filter((row) => text(get(row, 'status')) !== '정산')
+    // 기존 조회 페이지는 정산 완료를 제외하고, 로컬 대장은 완료 이력까지 읽는다.
+    .filter((row) => options.includeCompleted || text(get(row, 'status')) !== '정산')
 
   const parsed = rows.map((row, index): OnlineOrder => {
     const excelRow = dataRow + index + 1
     const sourceNo = text(get(row, 'source_no'))
-    const storeName = text(get(row, 'store_name'))
+    const storeName = text(get(row, 'store_name')) || options.defaultStoreName || metadata.store_name
     // 현재 원본에는 점포번호가 없으므로 매장명을 점포 분리 키로 사용한다.
     // 향후 점포 마스터가 연결되면 명시적인 store_code가 매장명보다 우선한다.
     const storeCode = text(get(row, 'store_code')) || storeName
@@ -132,4 +168,18 @@ export async function parseOrderExcel(file: File): Promise<OnlineOrder[]> {
   const sheet = workbook.Sheets[workbook.SheetNames[0]]
   if (!sheet) throw new Error('첫 번째 시트를 읽을 수 없습니다.')
   return parseOrderSheet(sheet)
+}
+
+export async function parseLedgerExcel(file: File): Promise<ParsedLedgerExcel> {
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
+  const sheetName = workbook.SheetNames[0]
+  const sheet = workbook.Sheets[sheetName]
+  if (!sheet) throw new Error('첫 번째 시트를 읽을 수 없습니다.')
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true }) as SheetMatrix
+  const { headerRow } = locateHeaders(matrix)
+  const metadata = { ...extractMetadata(matrix, headerRow), sheet_name: sheetName }
+  return {
+    orders: parseOrderSheet(sheet, { includeCompleted: true, defaultStoreName: metadata.store_name }),
+    metadata,
+  }
 }
