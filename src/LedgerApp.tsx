@@ -178,8 +178,14 @@ function LedgerApp() {
     const needle = query.trim().toLowerCase()
     return matchesFilter && (!needle || [order.order_no, order.brand, order.product_name, order.style_code].some((value) => value.toLowerCase().includes(needle)))
   }).sort((a, b) => {
-    const rank = { delayed: 0, warning: 1, normal: 2, complete: 3 }
-    const priority = rank[a.slaLevel] - rank[b.slaLevel]
+    const priorityRank = (order: LedgerOrderWithSla) => {
+      if (order.slaLevel === 'delayed' && order.exceptionType === 'settlement_delay') return 0
+      if (order.slaLevel === 'delayed' && order.exceptionType === 'shipping_delay') return 1
+      if (order.slaLevel === 'warning') return 2
+      if (order.slaLevel === 'normal') return 3
+      return 4
+    }
+    const priority = priorityRank(a) - priorityRank(b)
     if (priority) return priority
     const dueOrder = (a.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
     if (dueOrder) return dueOrder
@@ -249,8 +255,8 @@ function LedgerApp() {
       {error && <div className="form-error page-error"><CircleAlert size={16} />{error}</div>}
       <section className="metrics ledger-metrics">
         <button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}><div className="metric-icon dark"><ArrowDownToLine /></div><span>{includeCompleted ? '전체 주문' : '진행 중 주문'}</span><strong>{enriched.length}<small>건</small></strong><p>{includeCompleted ? '정산 완료 포함' : '현재 미완료'}</p></button>
-        <button className={`danger ${filter === 'shipping_delay' ? 'selected' : ''}`} onClick={() => setFilter('shipping_delay')}><div className="metric-icon red"><AlertTriangle /></div><span>출고 지연</span><strong>{counts.shipping}<small>건</small></strong><p>등록 2일 초과</p></button>
-        <button className={`danger ${filter === 'settlement_delay' ? 'selected' : ''}`} onClick={() => setFilter('settlement_delay')}><div className="metric-icon amber"><Clock3 /></div><span>정산 지연</span><strong>{counts.settlement}<small>건</small></strong><p>출고 5일 초과</p></button>
+        <button className={`danger ${filter === 'settlement_delay' ? 'selected' : ''}`} onClick={() => setFilter('settlement_delay')}><div className="metric-icon red"><AlertTriangle /></div><span>정산 지연</span><strong>{counts.settlement}<small>건</small></strong><p>출고 5일 초과 · 최우선 확인</p></button>
+        <button className={`attention ${filter === 'shipping_delay' ? 'selected' : ''}`} onClick={() => setFilter('shipping_delay')}><div className="metric-icon amber"><Clock3 /></div><span>출고 지연</span><strong>{counts.shipping}<small>건</small></strong><p>등록 2일 초과</p></button>
         <button className={filter === 'warning' ? 'selected' : ''} onClick={() => setFilter('warning')}><div className="metric-icon green"><Clock3 /></div><span>D-DAY · 임박</span><strong>{counts.warning}<small>건</small></strong><p>처리기한 1일 이내</p></button>
       </section>
 

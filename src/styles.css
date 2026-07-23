@@ -28,3 +28,4 @@ body:before{content:"";position:fixed;z-index:-1;inset:0;pointer-events:none;bac
 .sidebar .brand{gap:8px;margin-left:0;margin-right:0}.sidebar .brand-mark{flex:0 0 36px}.sidebar .brand>span:last-child{white-space:nowrap;font-size:12px;letter-spacing:-.045em}
 @media(max-width:720px){.table-scroll{max-height:68vh}.table-scroll th{font-size:10px}}
 .store-picker-list{height:150px;max-height:150px}.store-picker-list p{height:100%;margin:0;display:grid;place-items:center}
+.metrics>button.attention{border-left:3px solid #d99a16}
