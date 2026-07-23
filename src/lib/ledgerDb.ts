@@ -5,11 +5,16 @@ const DB_NAME = 'third-party-online-ledger'
 const STORE_NAME = 'app_state'
 const STATE_KEY = 'ledger'
 
+export type HandlingStatus = '미확인' | '확인 중' | '조치 완료'
+
 export interface LedgerOrder extends OnlineOrder {
   first_seen_at: string
   last_seen_at: string
   previous_status: OrderStatus | null
   missing_from_latest: boolean
+  handling_status: HandlingStatus
+  handling_memo: string
+  handling_updated_at: string | null
 }
 
 export interface LedgerSyncSummary {
@@ -103,6 +108,9 @@ export function mergeLedger(previous: LedgerState, incoming: OnlineOrder[], file
       last_seen_at: now,
       previous_status: statusChanged ? existing!.status : existing?.previous_status || null,
       missing_from_latest: false,
+      handling_status: existing?.handling_status || '미확인',
+      handling_memo: existing?.handling_memo || '',
+      handling_updated_at: existing?.handling_updated_at || null,
     })
   }
 
@@ -127,5 +135,25 @@ export function mergeLedger(previous: LedgerState, incoming: OnlineOrder[], file
         completed_count: completedCount,
       },
     },
+  }
+}
+
+export function updateOrderHandling(
+  state: LedgerState,
+  target: Pick<OnlineOrder, 'store_name' | 'order_no' | 'line_no'>,
+  patch: Partial<Pick<LedgerOrder, 'handling_status' | 'handling_memo'>>,
+): LedgerState {
+  const targetKey = orderKey(target)
+  return {
+    ...state,
+    orders: state.orders.map((order) => orderKey(order) === targetKey
+      ? {
+          ...order,
+          handling_status: order.handling_status || '미확인',
+          handling_memo: order.handling_memo || '',
+          ...patch,
+          handling_updated_at: new Date().toISOString(),
+        }
+      : order),
   }
 }

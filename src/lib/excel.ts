@@ -1,5 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { OnlineOrder, OrderStatus } from '../types'
+import type { LedgerOrder } from './ledgerDb'
+import { withSla } from './sla'
 
 type SheetRow = Record<string, unknown>
 type SheetMatrix = unknown[][]
@@ -211,4 +213,64 @@ export async function parseLedgerExcel(file: File): Promise<ParsedLedgerExcel> {
     orders: parseOrderSheet(sheet, { includeCompleted: true, defaultStoreName: metadata.store_name }),
     metadata,
   }
+}
+
+const exportDate = (value: string | null | undefined) => {
+  if (!value) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+export function buildLedgerExcel(orders: LedgerOrder[], storeName: string) {
+  const headers = [
+    '대장 구분', '기한 상태', '매장 처리상태', '처리 메모', '처리상태 수정일',
+    '매장명', '주문번호', '순번', '진행상태', '발송구분', '등록일자', '출고일', '정산일',
+    '브랜드', '상품명', '스타일', '컬러', '사이즈', '수량', '현재고', '정상가', '판매금액',
+    '점출입상태', '출고자', '정산자', '매출일자', 'POS번호', '거래번호', '최초 인식일', '마지막 확인일',
+  ]
+  const sorted = [...orders].sort((a, b) => {
+    const closedA = Number(a.status === '정산' || a.missing_from_latest)
+    const closedB = Number(b.status === '정산' || b.missing_from_latest)
+    return closedA - closedB || b.registered_at.localeCompare(a.registered_at) || a.line_no - b.line_no
+  })
+  const rows = sorted.map((order) => {
+    const sla = withSla(order)
+    const ledgerLabel = order.missing_from_latest ? '현재 파일 미포함' : order.status === '정산' ? '정산 완료' : '진행 중'
+    return [
+      ledgerLabel, sla.slaLabel, order.handling_status || '미확인', order.handling_memo || '', exportDate(order.handling_updated_at),
+      order.store_name, order.order_no, order.line_no, order.status, order.shipping_type,
+      exportDate(order.registered_at), exportDate(order.shipped_at), exportDate(order.settled_at),
+      order.brand, order.product_name, order.style_code, order.color, order.size, order.quantity, order.stock_quantity,
+      order.regular_price, order.sale_amount, order.store_transfer_status, order.shipped_by, order.settled_by,
+      exportDate(order.sales_date), order.pos_no, order.transaction_no, exportDate(order.first_seen_at), exportDate(order.last_seen_at),
+    ]
+  })
+  const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows], { cellDates: true })
+  sheet['!autofilter'] = { ref: `A1:${XLSX.utils.encode_col(headers.length - 1)}${rows.length + 1}` }
+  const widths = [15, 15, 18, 30, 20, 22, 22, 8, 12, 16, 13, 13, 13, 14, 30, 16, 18, 10, 8, 8, 14, 14, 16, 14, 14, 13, 12, 16, 18, 18]
+  sheet['!cols'] = widths.map((wch) => ({ wch }))
+  ;[4, 10, 11, 12, 25, 28, 29].forEach((column) => {
+    for (let row = 1; row <= rows.length; row += 1) {
+      const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })]
+      if (cell?.t === 'd') cell.z = column === 4 ? 'yyyy-mm-dd hh:mm' : 'yyyy-mm-dd'
+    }
+  })
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '주문 대장')
+  const safeStore = (storeName || '점포').replace(/[\\/:*?"<>|]/g, '_')
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date()).replace(/-/g, '')
+  return {
+    fileName: `타사온라인_대장_${safeStore}_${today}.xlsx`,
+    bytes: XLSX.write(workbook, { bookType: 'xlsx', type: 'array', compression: true }) as ArrayBuffer,
+  }
+}
+
+export function downloadLedgerExcel(orders: LedgerOrder[], storeName: string) {
+  const { fileName, bytes } = buildLedgerExcel(orders, storeName)
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  anchor.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }

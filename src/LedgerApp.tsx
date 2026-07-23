@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, ArrowDownToLine, Check, CircleAlert, Clock3, FileSpreadsheet, MonitorDown, PackageCheck, RefreshCw, Search, ShieldCheck, Store, Trash2, UploadCloud } from 'lucide-react'
-import { clearLedger, mergeLedger, readLedger, writeLedger, type LedgerState } from './lib/ledgerDb'
+import { AlertTriangle, ArrowDownToLine, Check, CircleAlert, Clock3, FileDown, FileSpreadsheet, MonitorDown, PackageCheck, RefreshCw, Search, ShieldCheck, Store, Trash2, UploadCloud } from 'lucide-react'
+import { clearLedger, mergeLedger, readLedger, updateOrderHandling, writeLedger, type HandlingStatus, type LedgerOrder, type LedgerState } from './lib/ledgerDb'
 import { formatDate, withSla } from './lib/sla'
 import type { OrderWithSla } from './types'
 
@@ -11,14 +11,17 @@ type InstallPromptEvent = Event & {
 }
 const filterLabels: Record<Filter, string> = { all: '전체 예외', shipping_delay: '출고 지연', settlement_delay: '정산 지연', warning: 'D-DAY · 임박' }
 const emptyLedger: LedgerState = { version: 1, orders: [], latest_store_names: [], last_upload: null }
+type LedgerOrderWithSla = OrderWithSla & LedgerOrder
 
 const periodDate = (value: string | null | undefined) => value ? value.replace(/-/g, '.') : '—'
 
 function LedgerApp() {
   const inputRef = useRef<HTMLInputElement>(null)
+  const ledgerRef = useRef<LedgerState>(emptyLedger)
   const [ledger, setLedger] = useState<LedgerState>(emptyLedger)
   const [booting, setBooting] = useState(true)
   const [uploading, setUploading] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState('')
   const [activeStore, setActiveStore] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
@@ -31,6 +34,7 @@ function LedgerApp() {
   useEffect(() => {
     document.title = '타사 온라인 대장관리'
     readLedger().then((state) => {
+      ledgerRef.current = state
       setLedger(state)
       setActiveStore(state.latest_store_names[0] || '')
     }).catch(() => setError('이 브라우저의 대장을 불러오지 못했습니다.')).finally(() => setBooting(false))
@@ -76,10 +80,12 @@ function LedgerApp() {
       const parsed = await parseLedgerExcel(file)
       if (!parsed.orders.length) throw new Error('주문 데이터가 없습니다. Excel 조회조건과 헤더를 확인해 주세요.')
       const incomingStores = new Set(parsed.orders.map((order) => order.store_name))
-      const overlaps = ledger.latest_store_names.some((store) => incomingStores.has(store))
-      if (ledger.orders.length && !overlaps && !window.confirm('현재 대장과 다른 점포의 파일입니다. 이 파일의 점포를 대장에 추가할까요?')) return
-      const next = mergeLedger(ledger, parsed.orders, file.name, parsed.metadata)
+      const current = ledgerRef.current
+      const overlaps = current.latest_store_names.some((store) => incomingStores.has(store))
+      if (current.orders.length && !overlaps && !window.confirm('현재 대장과 다른 점포의 파일입니다. 이 파일의 점포를 대장에 추가할까요?')) return
+      const next = mergeLedger(current, parsed.orders, file.name, parsed.metadata)
       await writeLedger(next)
+      ledgerRef.current = next
       setLedger(next)
       setActiveStore((current) => next.latest_store_names.includes(current) ? current : next.latest_store_names[0] || '')
       setFilter('all'); setQuery('')
@@ -94,11 +100,37 @@ function LedgerApp() {
   const resetLedger = async () => {
     if (!window.confirm('이 PC에 저장된 주문 대장을 모두 초기화할까요? 원본 Excel은 삭제되지 않습니다.')) return
     await clearLedger()
+    ledgerRef.current = emptyLedger
     setLedger(emptyLedger); setActiveStore(''); setFilter('all'); setQuery('')
   }
 
+  const saveHandling = async (order: LedgerOrder, patch: Partial<Pick<LedgerOrder, 'handling_status' | 'handling_memo'>>) => {
+    const next = updateOrderHandling(ledgerRef.current, order, patch)
+    ledgerRef.current = next
+    setLedger(next)
+    try {
+      await writeLedger(next)
+    } catch {
+      setError('매장 처리상태를 저장하지 못했습니다. 다시 시도해 주세요.')
+    }
+  }
+
+  const exportLedger = async () => {
+    setExporting(true); setError('')
+    try {
+      const storeLedger = ledgerRef.current.orders.filter((order) => order.store_name === activeStore)
+      if (!storeLedger.length) throw new Error('저장할 주문 대장이 없습니다.')
+      const { downloadLedgerExcel } = await import('./lib/excel')
+      downloadLedgerExcel(storeLedger, activeStore)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '대장 Excel을 저장하지 못했습니다.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const storeOrders = useMemo(() => ledger.orders.filter((order) => order.store_name === activeStore && !order.missing_from_latest && order.status !== '정산'), [ledger.orders, activeStore])
-  const enriched = useMemo(() => storeOrders.map((order) => withSla(order)), [storeOrders])
+  const enriched = useMemo(() => storeOrders.map((order) => withSla(order) as LedgerOrderWithSla), [storeOrders])
   const visible = useMemo(() => enriched.filter((order) => {
     const matchesFilter = filter === 'all' || (filter === 'warning' ? order.slaLevel === 'warning' : order.slaLevel === 'delayed' && order.exceptionType === filter)
     const needle = query.trim().toLowerCase()
@@ -149,6 +181,7 @@ function LedgerApp() {
       <div className="ledger-actions">
         <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden onChange={(event) => void importExcel(event.target.files?.[0])} />
         <button className="secondary-button" onClick={resetLedger}><Trash2 size={16} />대장 초기화</button>
+        <button className="secondary-button" disabled={exporting} onClick={() => void exportLedger()}><FileDown size={16} />{exporting ? '저장 중…' : '대장 Excel 저장'}</button>
         <button className="primary-button compact" disabled={uploading} onClick={() => inputRef.current?.click()}><RefreshCw size={16} />{uploading ? '확인 중…' : '오늘 데이터 불러오기'}</button>
       </div>
     </header>
@@ -176,16 +209,16 @@ function LedgerApp() {
 
       <section className="orders-panel">
         <div className="panel-toolbar"><div><h2>{filterLabels[filter]}</h2><span>{visible.length}건</span></div><div className="search-box"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="주문번호, 브랜드, 상품명 검색" /></div></div>
-        <LedgerTable orders={visible} />
+        <LedgerTable orders={visible} onHandlingChange={saveHandling} />
       </section>
       <div className="ledger-footer-note"><ShieldCheck size={14} />이 대장은 현재 브라우저의 IndexedDB에만 저장됩니다.</div>
     </div>
   </main>
 }
 
-function LedgerTable({ orders }: { orders: OrderWithSla[] }) {
+function LedgerTable({ orders, onHandlingChange }: { orders: LedgerOrderWithSla[]; onHandlingChange: (order: LedgerOrder, patch: Partial<Pick<LedgerOrder, 'handling_status' | 'handling_memo'>>) => Promise<void> }) {
   if (!orders.length) return <div className="table-empty"><PackageCheck size={28} /><strong>조건에 맞는 주문이 없습니다.</strong><span>필터나 검색어를 변경해 보세요.</span></div>
-  return <div className="table-scroll"><table><thead><tr><th>처리 상태</th><th>주문번호 / 순번</th><th>브랜드 / 상품</th><th>등록일</th><th>출고일</th><th>처리기한</th><th>진행상태</th><th>발송 구분</th></tr></thead><tbody>{orders.map((order) => <tr key={`${order.store_name}-${order.order_no}-${order.line_no}`} className={order.slaLevel === 'delayed' ? 'row-delayed' : ''}><td><span className={`sla-badge ${order.slaLevel}`}>{order.slaLevel === 'delayed' && <AlertTriangle size={13} />}{order.slaLabel}</span></td><td><strong className="order-no">{order.order_no}</strong><small className="line-no">#{order.line_no}</small></td><td><div className="product-cell"><strong>{order.brand || '—'}</strong><span>{order.product_name} · {order.quantity}개</span></div></td><td>{formatDate(order.registered_at)}</td><td>{formatDate(order.shipped_at)}</td><td className={order.slaLevel === 'delayed' ? 'red-text' : ''}>{formatDate(order.dueAt)}</td><td><span className="status-dot" />{order.status}</td><td>{order.shipping_type || '—'}</td></tr>)}</tbody></table></div>
+  return <div className="table-scroll"><table className="ledger-orders-table"><thead><tr><th>기한 상태</th><th>매장 처리</th><th>처리 메모</th><th>주문번호 / 순번</th><th>브랜드 / 상품</th><th>등록일</th><th>출고일</th><th>처리기한</th><th>진행상태</th><th>발송 구분</th></tr></thead><tbody>{orders.map((order) => <tr key={`${order.store_name}-${order.order_no}-${order.line_no}`} className={order.slaLevel === 'delayed' ? 'row-delayed' : ''}><td><span className={`sla-badge ${order.slaLevel}`}>{order.slaLevel === 'delayed' && <AlertTriangle size={13} />}{order.slaLabel}</span></td><td><select className={`handling-select handling-${(order.handling_status || '미확인').replace(/\s/g, '-')}`} value={order.handling_status || '미확인'} onChange={(event) => void onHandlingChange(order, { handling_status: event.target.value as HandlingStatus })}><option>미확인</option><option>확인 중</option><option>조치 완료</option></select></td><td><input className="handling-memo" defaultValue={order.handling_memo || ''} placeholder="메모 입력" onBlur={(event) => { if (event.target.value !== (order.handling_memo || '')) void onHandlingChange(order, { handling_memo: event.target.value }) }} /></td><td><strong className="order-no">{order.order_no}</strong><small className="line-no">#{order.line_no}</small></td><td><div className="product-cell"><strong>{order.brand || '—'}</strong><span>{order.product_name} · {order.quantity}개</span></div></td><td>{formatDate(order.registered_at)}</td><td>{formatDate(order.shipped_at)}</td><td className={order.slaLevel === 'delayed' ? 'red-text' : ''}>{formatDate(order.dueAt)}</td><td><span className="status-dot" />{order.status}</td><td>{order.shipping_type || '—'}</td></tr>)}</tbody></table></div>
 }
 
 export default LedgerApp
